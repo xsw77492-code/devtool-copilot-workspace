@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg0: #ffffff;
+  --bg1: #ffffff;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel2: rgba(255, 255, 255, 0.74);
+  --stroke: rgba(15, 23, 42, 0.10);
+  --stroke2: rgba(15, 23, 42, 0.06);
+  --text: #0b1220;
+  --muted: rgba(15, 23, 42, 0.62);
+  --muted2: rgba(15, 23, 42, 0.48);
+  --accent: #14b8a6;
+  --accent2: #06b6d4;
+  --shadow: 0 18px 60px rgba(15, 23, 42, 0.14);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 18px;
+  --space-5: 24px;
+
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: #ffffff;
+  overflow-x: hidden;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI Variable',
+    'Segoe UI',
+    Inter,
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.22) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 0px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.7);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.26);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.panel {
+  background: var(--panel2);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.h1 {
+  font-size: 20px;
+  letter-spacing: -0.2px;
+  margin: 0;
+  font-weight: 650;
+}
+
+.h2 {
+  font-size: 13px;
+  letter-spacing: 0.15px;
+  margin: 0;
+  font-weight: 620;
+}
+
+.subtle-sep {
+  height: 1px;
+  background: var(--stroke2);
+}
+
+.mono {
+  font-family:
+    ui-monospace,
+    'Cascadia Mono',
+    'SFMono-Regular',
+    Menlo,
+    Monaco,
+    Consolas,
+    'Liberation Mono',
+    monospace;
+}
+
+.hover-row {
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.hover-row:hover {
+  background: rgba(15, 23, 42, 0.03);
+  border-color: rgba(15, 23, 42, 0.10);
+}

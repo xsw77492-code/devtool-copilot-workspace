@@ -1,0 +1,17 @@
+[Unit]
+Description=DevTool Copilot Backend
+After=network.target
+
+[Service]
+Type=simple
+User=devtool
+WorkingDirectory=/opt/devtool-copilot/backend
+EnvironmentFile=/opt/devtool-copilot/backend/devtool-copilot-backend.env
+ExecStart=/usr/bin/java -jar /opt/devtool-copilot/backend/app.jar
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,83 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: devtool-copilot-backend
+  servlet:
+    multipart:
+      max-file-size: ${ATTACHMENT_MAX_FILE_SIZE:50MB}
+      max-request-size: ${ATTACHMENT_MAX_REQUEST_SIZE:60MB}
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://localhost:3306/devtool_copilot?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
+    hikari:
+      initialization-fail-timeout: 30000
+      connection-timeout: 10000
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:25}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: AUTO
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+
+devtool:
+  jwt:
+    issuer: devtool-copilot
+    secret: ${JWT_SECRET:change-me-please-change-in-prod}
+    expire-seconds: ${JWT_EXPIRE_SECONDS:7200}
+  auth:
+    max-failed-login-attempts: ${AUTH_MAX_FAILED_LOGIN_ATTEMPTS:5}
+    lock-minutes: ${AUTH_LOCK_MINUTES:15}
+    refresh-token-expire-days: ${AUTH_REFRESH_TOKEN_EXPIRE_DAYS:30}
+    password-reset-expire-minutes: ${AUTH_PASSWORD_RESET_EXPIRE_MINUTES:30}
+    require-email-verification: ${AUTH_REQUIRE_EMAIL_VERIFICATION:false}
+    email-verify-expire-minutes: ${AUTH_EMAIL_VERIFY_EXPIRE_MINUTES:10}
+    password-reset-max-per-email-per-hour: ${AUTH_PASSWORD_RESET_MAX_PER_EMAIL_PER_HOUR:3}
+    password-reset-max-per-ip-per-hour: ${AUTH_PASSWORD_RESET_MAX_PER_IP_PER_HOUR:10}
+    login-fail-max-per-ip-in10-min: ${AUTH_LOGIN_FAIL_MAX_PER_IP_IN10_MIN:20}
+  mail:
+    from: ${MAIL_FROM:no-reply@devtoolcopilot.local}
+  web:
+    base-url: ${WEB_BASE_URL:http://localhost:5173}
+  project:
+    invite:
+      expire-days: ${PROJECT_INVITE_EXPIRE_DAYS:7}
+      max-uses: ${PROJECT_INVITE_MAX_USES:1}
+  attachment:
+    base-dir: ${ATTACHMENT_BASE_DIR:data/attachments}
+    max-size-mb: ${ATTACHMENT_MAX_SIZE_MB:50}
+
+ai:
+  deepseek:
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: ${DEEPSEEK_MODEL:deepseek-chat}
+    temperature: ${DEEPSEEK_TEMPERATURE:0.2}
+    timeout-ms: ${DEEPSEEK_TIMEOUT_MS:60000}
+
+docgen:
+  wenduoduo:
+    base-url: ${WENDUODUO_BASE_URL:https://wenduoduo.cn}
+    api-key: ${WENDUODUO_API_KEY:}
+    use-api-token: ${WENDUODUO_USE_API_TOKEN:false}
+    template-id: ${WENDUODUO_TEMPLATE_ID:}
+    create-task-type: ${WENDUODUO_CREATE_TASK_TYPE:7}
+    timeout-ms: ${WENDUODUO_TIMEOUT_MS:120000}
+    poll-interval-ms: ${WENDUODUO_POLL_INTERVAL_MS:1500}
+    poll-timeout-ms: ${WENDUODUO_POLL_TIMEOUT_MS:300000}
+    query-task-path: ${WENDUODUO_QUERY_TASK_PATH:}
