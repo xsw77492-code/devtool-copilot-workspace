@@ -49,16 +49,6 @@
 - 后端：Java 17 + Spring Boot 3 + MyBatis-Plus + MySQL（清晰分层、易扩展）
 - 实时：WebSocket + SSE + 跨标签页兜底（能讲清“为什么实时不会乱/不会漏”）
 
-### 5) 你可以怎么演示（建议录 60–90 秒视频）
-
-建议录屏顺序（面试官最爱看这种“闭环链路”）：
-
-1. Workspace 创建项目 → 进入项目
-2. AI Chat 输入需求 → 生成 plan → 确认落地创建任务
-3. 打开 Kanban 拖拽推进一个任务到 DONE
-4. 进入 Task Detail 勾选 checklist、挂 deliverable、上传附件
-5. 打开 Inbox 批量处理一条待办
-6. 打开 Audit 导出（或展示关键操作留痕）
 
 ***
 
