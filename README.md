@@ -1,4 +1,6 @@
-<img width="1910" height="1035" alt="image" src="https://github.com/user-attachments/assets/f740d0ed-9aee-4019-96bc-3ea0ff7902f6" />
+<img width="1910" height="1035" alt="image" src="https://github.com/user-attachments/assets/0ba0338f-11c2-408e-adb1-69a22933600d" />
+**本项目为个人原创作品集，禁止未经授权的商业部署与商业化盈利，仅供技术学习与交流。转载、二次分发必须注明原仓库完整来源。**
+
 一个面向团队的智能开发者工作台：把「项目管理 + 协作闭环 + AI 对话内落地」整合到一套产品里，让“计划”可执行、让“执行”可追溯、让“交付”可验收。
 
 > 作品集定位：这是一个“能跑、能演示、能讲清架构”的完整产品型项目，而不是页面 Demo 或脚手架拼装。
