@@ -5,6 +5,8 @@ import com.devtoolcopilot.project.dto.ProjectInviteCreateResponse;
 import com.devtoolcopilot.project.dto.ProjectInviteItem;
 import com.devtoolcopilot.project.dto.ProjectMembersExportResponse;
 import com.devtoolcopilot.project.dto.ProjectMembersResponse;
+import com.devtoolcopilot.project.dto.ProjectTeamCenterResponse;
+import com.devtoolcopilot.project.dto.TeamGroupInviteCreateResponse;
 import com.devtoolcopilot.project.entity.ProjectMemberRole;
 
 import java.util.List;
@@ -41,6 +43,40 @@ public interface ProjectCollabService {
     void leaveProject(Long userId, Long projectId);
 
     ProjectMembersExportResponse exportMembers(Long userId, Long projectId);
+
+    ProjectTeamCenterResponse teamCenter(Long userId, Long groupId);
+
+    Long createTeamGroup(Long userId, String name);
+
+    void renameTeamGroup(Long userId, Long groupId, String name);
+
+    void deleteTeamGroup(Long userId, Long groupId);
+
+    TeamGroupInviteCreateResponse inviteToTeamGroup(Long userId, Long groupId, String email);
+
+    Long acceptTeamGroupInvite(Long userId, String token);
+
+    Long rejectTeamGroupInvite(Long userId, String token);
+
+    void cancelTeamGroupInvite(Long userId, Long groupId, Long inviteId);
+
+    TeamGroupInviteCreateResponse reissueTeamGroupInvite(Long userId, Long groupId, Long inviteId);
+
+    void removeTeamGroupMember(Long userId, Long groupId, Long memberUserId);
+
+    void leaveTeamGroup(Long userId, Long groupId);
+
+    void transferTeamGroupOwnership(Long userId, Long groupId, Long memberUserId);
+
+    java.util.List<ProjectTeamCenterResponse.InviteItem> teamInvitesMine(Long userId);
+
+    Long acceptTeamGroupInviteById(Long userId, Long inviteId);
+
+    Long rejectTeamGroupInviteById(Long userId, Long inviteId);
+
+    void deleteTeamGroupActivity(Long userId, Long groupId, Long activityId);
+
+    int clearTeamGroupActivities(Long userId, Long groupId);
 
     List<ProjectActivityItem> activities(Long userId, Long projectId, Integer limit);
 

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NCard, NCheckbox, NDatePicker, NDropdown, NInput, NModal, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NCard, NCheckbox, NDatePicker, NDropdown, NInput, NModal, NSelect, NSpin, NTabPane, NTabs, useDialog, useMessage } from 'naive-ui'
 import {
   taskApi,
   type DeliverableType,
   type Task,
+  type TaskBatchStatusResult,
   type TaskChecklistItem,
   type TaskComment,
   type TaskDeliverable,
@@ -14,11 +15,13 @@ import {
 } from '../api/task'
 import { attachmentApi, type AttachmentItem } from '../api/attachment'
 import { milestoneApi, type Milestone } from '../api/milestone'
-import { projectCollabApi, type ProjectMemberRole } from '../api/projectCollab'
+import { projectCollabApi, type ProjectMemberItem, type ProjectMemberRole } from '../api/projectCollab'
 import { useRealtimeStore } from '../stores/realtime'
 import { useAuthStore } from '../stores/auth'
+import { useProjectStore } from '../stores/project'
 import PresenceBar from '../components/PresenceBar.vue'
 import MarkdownView from '../components/MarkdownView.vue'
+import TaskLifecycleFilm from '../components/TaskLifecycleFilm.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,6 +29,7 @@ const message = useMessage()
 const dialog = useDialog()
 const rt = useRealtimeStore()
 const auth = useAuthStore()
+const ps = useProjectStore()
 
 const projectId = computed(() => {
   const pid = Number(route.params.projectId)
@@ -56,6 +60,7 @@ const highlightCommentId = ref<number | null>(null)
 const lastFocusedCommentId = ref<number | null>(null)
 const myRole = ref<ProjectMemberRole | null>(null)
 const memberOptions = ref<{ label: string; value: number }[]>([])
+const collabMembers = ref<ProjectMemberItem[]>([])
 const following = ref(false)
 const followLoading = ref(false)
 
@@ -80,6 +85,8 @@ const parentTask = ref<Task | null>(null)
 const subtaskOpen = ref(false)
 const subtaskTitle = ref('')
 const creatingSubtask = ref(false)
+const completingSubtasks = ref(false)
+const completeSubtasksResult = ref<TaskBatchStatusResult | null>(null)
 
 const deliverableModalOpen = ref(false)
 const deliverableSaving = ref(false)
@@ -104,18 +111,38 @@ const editAssigneeId = ref<number | null>(null)
 const editDueAt = ref<number | null>(null)
 const editStatus = ref<TaskStatus>('TODO')
 const editMilestoneId = ref<number | null>(null)
+const editParentTaskId = ref<number | null>(0)
+
+const parentCandidatesLoading = ref(false)
+const parentCandidates = ref<Task[]>([])
+const parentTaskSelectOptions = computed(() => {
+  const opts = parentCandidates.value
+    .slice()
+    .sort((a, b) => b.id - a.id)
+    .map((t) => ({ label: `#${t.id} · ${t.title}`, value: t.id }))
+  return [{ label: '无（顶层任务）', value: 0 }, ...opts]
+})
+
+const isSubtask = computed(() => Number(task.value?.parentTaskId || 0) > 0)
+const lockParentSelect = computed(() => subtasks.value.length > 0 && !isSubtask.value)
 
 const milestones = ref<Milestone[]>([])
 const milestoneOptions = computed(() => {
   const opts = milestones.value.map((m) => ({ label: m.name, value: m.id }))
-  return [{ label: 'Milestone: None', value: 0 }, ...opts]
+  return [{ label: '不关联里程碑', value: 0 }, ...opts]
 })
 
 const note = ref('')
 
-const canEdit = computed(() => myRole.value !== 'VIEWER')
+const projectArchived = computed(() => {
+  const p = ps.byId.get(projectIdSafe.value)
+  return Number((p as any)?.archived || 0) === 1
+})
+
+const canEdit = computed(() => myRole.value !== 'VIEWER' && !projectArchived.value)
 
 const moreOptions = computed(() => [
+  { key: 'back', label: '返回项目' },
   { key: 'follow', label: following.value ? '取消关注' : '关注' },
   { key: 'delete', label: '删除任务', disabled: !canEdit.value }
 ])
@@ -151,6 +178,57 @@ const taskEditors = computed(() => {
   return taskViewers.value.filter((m) => m.editing === true)
 })
 
+const taskCommentParticipants = computed(() => {
+  const names = new Set<string>()
+  for (const item of comments.value) {
+    if (item.username) names.add(item.username)
+  }
+  return [...names]
+})
+
+const taskReplyCount = computed(() => comments.value.filter((item) => Number(item.replyToId || 0) > 0).length)
+const taskMentionCount = computed(() =>
+  comments.value.reduce((sum, item) => sum + ((item.content || '').match(/@\S+/g)?.length || 0), 0)
+)
+const taskOnlineMembers = computed(() => collabMembers.value.filter((item) => Number(item.online || 0) === 1))
+const taskRiskFlag = computed(() => {
+  if (!task.value || task.value.status === 'DONE' || !task.value.dueTime) return false
+  const ts = Date.parse(task.value.dueTime)
+  if (Number.isNaN(ts)) return false
+  return ts < Date.now()
+})
+const taskDueSoonFlag = computed(() => {
+  if (!task.value || task.value.status === 'DONE' || !task.value.dueTime) return false
+  const ts = Date.parse(task.value.dueTime)
+  if (Number.isNaN(ts)) return false
+  return ts - Date.now() <= 3 * 24 * 60 * 60 * 1000
+})
+const taskCollabHeadline = computed(() => {
+  if (taskRiskFlag.value) return '任务进入风险区'
+  if (taskDueSoonFlag.value) return '任务进入临期窗口'
+  if (taskEditors.value.length > 0) return `${taskEditors.value.length} 位成员正在同步编辑`
+  if (comments.value.length > 0) return '讨论与交付持续回流'
+  return '协作节奏已建立'
+})
+const taskCollabFocus = computed(() => {
+  if (taskRiskFlag.value || taskDueSoonFlag.value) return 'risk'
+  if (taskReplyCount.value > 0) return 'reply'
+  if (taskMentionCount.value > 0) return 'mention'
+  return 'all'
+})
+const taskInboxCategory = computed(() => {
+  if (taskCollabFocus.value === 'reply') return 'REPLY'
+  if (taskCollabFocus.value === 'mention') return 'MENTION'
+  return undefined
+})
+
+const taskSignalRows = computed(() => [
+  { key: 'online', label: '在线协作者', value: String(taskOnlineMembers.value.length) },
+  { key: 'viewers', label: '正在查看', value: String(taskViewers.value.length) },
+  { key: 'replies', label: '讨论回复', value: String(taskReplyCount.value) },
+  { key: 'mentions', label: '@ 提及', value: String(taskMentionCount.value) }
+])
+
 let editingTimer: any = null
 let lastRemotePromptAt = 0
 let autoRefreshTimer: any = null
@@ -165,16 +243,44 @@ function markEditing() {
 }
 
 const priorityOptions = [
-  { label: 'LOW', value: 'LOW' },
-  { label: 'MEDIUM', value: 'MEDIUM' },
-  { label: 'HIGH', value: 'HIGH' }
+  { label: '低优先级', value: 'LOW' },
+  { label: '中优先级', value: 'MEDIUM' },
+  { label: '高优先级', value: 'HIGH' }
 ]
 
 const statusOptions = [
-  { label: 'TODO', value: 'TODO' },
-  { label: 'DOING', value: 'DOING' },
-  { label: 'DONE', value: 'DONE' }
+  { label: '待办', value: 'TODO' },
+  { label: '进行中', value: 'DOING' },
+  { label: '已完成', value: 'DONE' }
 ]
+
+function statusLabel(st?: string) {
+  const v = String(st || '').toUpperCase()
+  if (v === 'DOING') return '进行中'
+  if (v === 'DONE') return '已完成'
+  return '待办'
+}
+
+function deliverableTypeLabel(t?: string) {
+  const v = String(t || '').toUpperCase()
+  if (v === 'LINK') return '链接'
+  if (v === 'DOC') return '文档'
+  if (v === 'PR') return 'PR'
+  return v
+}
+
+function timelineTypeLabel(t?: string) {
+  const map: Record<string, string> = {
+    CREATED: '创建任务',
+    STATUS_CHANGED: '状态变更',
+    UPDATED: '更新任务',
+    NOTE: '备注',
+    COMMENT: '评论',
+    PR_LINKED: '关联 PR',
+    PR_UNLINKED: '取消关联 PR'
+  }
+  return (t && map[t.toUpperCase()]) || t || ''
+}
 
 function fmt(ts?: number) {
   if (!ts) return ''
@@ -187,8 +293,12 @@ function fmt(ts?: number) {
   return `${y}-${m}-${dd} ${hh}:${mm}`
 }
 
+
 function onMoreSelect(key: string) {
-  if (key === 'follow') toggleFollow()
+  if (key === 'back') {
+    if (projectIdSafe.value) router.push({ name: 'project-detail', params: { id: projectIdSafe.value } })
+    else router.push({ name: 'workspace' })
+  } else if (key === 'follow') toggleFollow()
   else if (key === 'delete') removeTask()
 }
 
@@ -212,6 +322,7 @@ async function load() {
     editDueAt.value = t.dueTime ? Date.parse(t.dueTime) : null
     editStatus.value = t.status
     editMilestoneId.value = (t.milestoneId as any) ?? null
+    editParentTaskId.value = Number((t as any).parentTaskId || 0) || 0
     ;(async () => {
       try {
         timeline.value = await taskApi.timeline(taskId.value)
@@ -225,6 +336,7 @@ async function load() {
     void loadChecklist()
     void loadParentTask()
     void loadSubtasks()
+    void loadParentCandidates()
 
     ;(async () => {
       try {
@@ -232,9 +344,11 @@ async function load() {
         if (!pid) throw new Error('bad pid')
         const members = await projectCollabApi.members(pid)
         myRole.value = members.myRole
+        collabMembers.value = members.members || []
         memberOptions.value = members.members.map((m) => ({ label: m.username, value: m.userId }))
       } catch {
         myRole.value = null
+        collabMembers.value = []
         memberOptions.value = []
       }
     })()
@@ -268,6 +382,24 @@ async function load() {
     message.error(e?.message || '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadParentCandidates() {
+  const pid = projectIdSafe.value
+  if (!pid) {
+    parentCandidates.value = []
+    return
+  }
+  parentCandidatesLoading.value = true
+  try {
+    const list = await taskApi.listByProject(pid)
+    const curId = Number(taskId.value || 0)
+    parentCandidates.value = list.filter((x) => !x.parentTaskId && x.id !== curId)
+  } catch {
+    parentCandidates.value = []
+  } finally {
+    parentCandidatesLoading.value = false
   }
 }
 
@@ -374,8 +506,67 @@ async function createSubtask() {
   }
 }
 
+async function doCompleteSubtasks(ids: number[], forceDone?: boolean) {
+  if (!ids.length) return
+  completingSubtasks.value = true
+  try {
+    const res = await taskApi.batchUpdateStatusDetail(ids, 'DONE', { forceDone: forceDone ?? undefined })
+    completeSubtasksResult.value = res
+    if (!res.failed?.length) {
+      message.success(`已完成 ${res.ok} 项`)
+    } else {
+      message.warning(`已完成 ${res.ok} 项，${res.failed.length} 项未完成`)
+    }
+
+    const blocked = (res.failed || []).filter((x) => Number(x.code || 0) === 409)
+    if (!forceDone && blocked.length) {
+      dialog.warning({
+        title: 'DONE 门槛拦截',
+        content: `有 ${blocked.length} 个子任务未满足验收清单，是否强制完成？`,
+        positiveText: '强制完成',
+        negativeText: '取消',
+        onPositiveClick: async () => {
+          await doCompleteSubtasks(blocked.map((x) => x.taskId), true)
+        }
+      })
+    }
+    await loadSubtasks()
+    timeline.value = await taskApi.timeline(taskId.value)
+  } catch (e: any) {
+    message.error(e?.message || '批量完成失败')
+  } finally {
+    completingSubtasks.value = false
+  }
+}
+
+function completeIncompleteSubtasks() {
+  if (!canEdit.value) return
+  const ids = subtasks.value.filter((x) => String(x.status || '') !== 'DONE').map((x) => x.id)
+  if (!ids.length) {
+    message.info('子任务已全部完成')
+    return
+  }
+  dialog.warning({
+    title: '批量完成子任务',
+    content: `将完成 ${ids.length} 个子任务（未完成项）。继续？`,
+    positiveText: '完成',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      await doCompleteSubtasks(ids, false)
+    }
+  })
+}
+
 const checklistDoneCount = computed(() => checklist.value.filter((x) => Number(x.isDone || 0) === 1).length)
 const deliverableDoneCount = computed(() => deliverables.value.filter((x) => String(x.status || '').toUpperCase() === 'DONE').length)
+const subtaskDoneCount = computed(() => subtasks.value.filter((x) => String(x.status || '') === 'DONE').length)
+const subtaskTotalCount = computed(() => subtasks.value.length)
+const workTab = ref<'sub' | 'discuss'>('sub')
+const subtaskProgressPct = computed(() => {
+  const total = subtaskTotalCount.value
+  if (!total) return 0
+  return Math.round((subtaskDoneCount.value / total) * 100)
+})
 
 function openDeliverableCreate() {
   editingDeliverableId.value = null
@@ -772,6 +963,7 @@ async function removeAttachment(a: AttachmentItem) {
 }
 
 onMounted(() => {
+  if (!ps.projects.length) void ps.load()
   if (projectId.value > 0) rt.subscribe(projectId.value, 'TASK', taskId.value)
   load()
   if (!autoRefreshTimer) {
@@ -911,6 +1103,7 @@ async function save() {
       acceptanceCriteria: editAcceptance.value,
       priority: editPriority.value || undefined,
       milestoneId: editMilestoneId.value ?? undefined,
+      parentTaskId: lockParentSelect.value ? 0 : Number(editParentTaskId.value || 0),
       tags: editTags.value,
       assignee: editAssignee.value,
       assigneeId: editAssigneeId.value,
@@ -962,6 +1155,7 @@ async function save() {
               acceptanceCriteria: editAcceptance.value,
               priority: editPriority.value || undefined,
               milestoneId: editMilestoneId.value ?? undefined,
+              parentTaskId: lockParentSelect.value ? 0 : Number(editParentTaskId.value || 0),
               tags: editTags.value,
               assignee: editAssignee.value,
               assigneeId: editAssigneeId.value,
@@ -1055,10 +1249,24 @@ async function removeTask() {
 </script>
 
 <template>
-  <div class="page detail-page px-5 py-5">
+  <div class="page detail-page">
     <div class="top">
       <div class="left">
-        <div class="h1">{{ editTitle || `Task #${taskId}` }}</div>
+        <div class="crumbs">
+          <button
+            class="crumb"
+            type="button"
+            @click="router.push(projectIdSafe ? { name: 'project-detail', params: { id: projectIdSafe } } : { name: 'workspace' })"
+          >
+            项目 #{{ projectIdSafe || '-' }}
+          </button>
+          <span v-if="parentTask" class="sep">/</span>
+          <button v-if="parentTask" class="crumb" type="button" @click="goTask(parentTask.id)">{{ parentTask.title }}</button>
+        </div>
+        <div class="h1Line">
+          <div class="h1">{{ editTitle || `任务 #${taskId}` }}</div>
+          <span class="muted taskNo">#{{ taskId }}</span>
+        </div>
       </div>
       <div class="right">
         <presence-bar :project-id="projectIdSafe" />
@@ -1066,7 +1274,6 @@ async function removeTask() {
           <span class="pill watch">在看 {{ taskViewers.length }}</span>
           <span v-if="taskEditors.length" class="pill edit">编辑中 {{ taskEditors.length }}</span>
         </div>
-        <button class="btnGhost" @click="router.push(projectIdSafe ? { name: 'project-detail', params: { id: projectIdSafe } } : { name: 'workspace' })">返回</button>
         <n-dropdown :options="moreOptions" placement="bottom-end" @select="onMoreSelect">
           <button class="btnGhost" type="button" :disabled="followLoading">更多</button>
         </n-dropdown>
@@ -1077,7 +1284,7 @@ async function removeTask() {
       </div>
     </div>
 
-    <div v-if="loading || !task" class="panel loading">Loading…</div>
+    <div v-if="loading || !task" class="panel loading">正在加载任务…</div>
 
     <div v-else class="grid">
       <n-card class="panel block" :bordered="false">
@@ -1087,84 +1294,102 @@ async function removeTask() {
         </div>
 
         <div class="form">
-          <div class="row2">
-            <div>
-              <div class="muted label">标题</div>
-              <n-input v-model:value="editTitle" :disabled="!canEdit" placeholder="输入任务标题" />
+          <div class="formGroup">
+            <div class="groupLabel">基础信息</div>
+            <div class="row2">
+              <div>
+                <div class="muted label">标题</div>
+                <n-input v-model:value="editTitle" :disabled="!canEdit" placeholder="输入任务标题" />
+              </div>
+              <div>
+                <div class="muted label">状态</div>
+                <n-select v-model:value="editStatus" :options="statusOptions" :disabled="!canEdit" />
+              </div>
             </div>
-            <div>
-              <div class="muted label">状态</div>
-              <n-select v-model:value="editStatus" :options="statusOptions" :disabled="!canEdit" />
+            <div class="row2">
+              <div>
+                <div class="muted label">优先级</div>
+                <n-select
+                  v-model:value="editPriority"
+                  clearable
+                  :options="priorityOptions"
+                  :disabled="!canEdit"
+                  placeholder="选择优先级"
+                />
+              </div>
+              <div>
+                <div class="muted label">截止时间</div>
+                <n-date-picker v-model:value="editDueAt" type="datetime" clearable :disabled="!canEdit" />
+              </div>
             </div>
           </div>
 
-          <div class="row2">
+          <div class="formGroup">
+            <div class="groupLabel">协作</div>
+            <div class="row2">
+              <div>
+                <div class="muted label">负责人</div>
+                <n-select
+                  v-model:value="editAssigneeId"
+                  :options="memberOptions"
+                  placeholder="选择负责人"
+                  :disabled="!canEdit"
+                />
+              </div>
+              <div>
+                <div class="muted label">标签</div>
+                <n-input v-model:value="editTags" :disabled="!canEdit" placeholder="用逗号分隔,如:前端,后端,紧急" />
+              </div>
+            </div>
+            <div class="row2">
+              <div>
+                <div class="muted label">里程碑</div>
+                <n-select
+                  v-model:value="editMilestoneId"
+                  clearable
+                  :options="milestoneOptions"
+                  :disabled="!canEdit"
+                  placeholder="选择里程碑"
+                />
+              </div>
+              <div>
+                <div class="muted label">父任务</div>
+                <n-select
+                  v-model:value="editParentTaskId"
+                  clearable
+                  :options="parentTaskSelectOptions"
+                  :disabled="!canEdit || lockParentSelect"
+                  :loading="parentCandidatesLoading"
+                  placeholder="选择父任务（可选）"
+                />
+                <div v-if="lockParentSelect" class="muted hint">当前任务已有子任务，不能再挂到其他父任务下</div>
+                <button v-else-if="parentTask" class="btnLink mt-1" type="button" @click="goTask(parentTask.id)">打开父任务</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="formGroup">
+            <div class="groupLabel">内容</div>
             <div>
-              <div class="muted label">优先级</div>
-              <n-select
-                v-model:value="editPriority"
-                clearable
-                :options="priorityOptions"
+              <div class="muted label">描述</div>
+              <n-input
+                v-model:value="editDescription"
+                type="textarea"
+                :autosize="{ minRows: 3, maxRows: 10 }"
                 :disabled="!canEdit"
-                placeholder="选择优先级"
+                placeholder="补充背景、范围、约束与上下文"
               />
             </div>
             <div>
-              <div class="muted label">截止时间</div>
-              <n-date-picker v-model:value="editDueAt" type="datetime" clearable :disabled="!canEdit" />
-            </div>
-          </div>
-
-          <div class="row2">
-            <div>
-              <div class="muted label">负责人</div>
-              <n-select
-                v-model:value="editAssigneeId"
-                :options="memberOptions"
-                placeholder="选择负责人"
+              <div class="muted label">验收标准</div>
+              <n-input
+                v-model:value="editAcceptance"
+                type="textarea"
+                :autosize="{ minRows: 3, maxRows: 10 }"
                 :disabled="!canEdit"
+                placeholder="给出可验证的验收点（可操作、可检查）"
               />
             </div>
-            <div>
-              <div class="muted label">标签</div>
-              <n-input v-model:value="editTags" :disabled="!canEdit" placeholder="用逗号分隔：frontend,bug,urgent" />
-            </div>
-          </div>
-
-          <div class="row2">
-            <div>
-              <div class="muted label">Milestone</div>
-              <n-select
-                v-model:value="editMilestoneId"
-                clearable
-                :options="milestoneOptions"
-                :disabled="!canEdit"
-                placeholder="选择里程碑"
-              />
-            </div>
-            <div />
-          </div>
-
-          <div>
-            <div class="muted label">描述</div>
-            <n-input
-              v-model:value="editDescription"
-              type="textarea"
-              :autosize="{ minRows: 3, maxRows: 10 }"
-              :disabled="!canEdit"
-              placeholder="补充背景、范围、约束与上下文"
-            />
-          </div>
-
-          <div>
-            <div class="muted label">验收标准</div>
-            <n-input
-              v-model:value="editAcceptance"
-              type="textarea"
-              :autosize="{ minRows: 3, maxRows: 10 }"
-              :disabled="!canEdit"
-              placeholder="给出可验证的验收点（可操作、可检查）"
-            />
           </div>
         </div>
       </n-card>
@@ -1185,143 +1410,145 @@ async function removeTask() {
 
         <div class="timeline timelineScroll">
           <div v-for="e in timeline" :key="e.id" class="titem">
-            <div class="tmain">
-              <div class="tt">
-                <div class="tlabel">{{ e.title || e.type }}</div>
-                <div class="muted ttime">{{ fmt(e.createdAt) }}</div>
-              </div>
-              <div class="tdetail">{{ e.detail }}</div>
+            <span class="tDot" />
+            <div class="tMain">
+              <div class="tlabel">{{ e.title || timelineTypeLabel(e.type) }}</div>
+              <div v-if="e.detail" class="tdetail">{{ e.detail }}</div>
             </div>
+            <div class="muted ttime">{{ fmt(e.createdAt) }}</div>
           </div>
           <div v-if="!timeline.length" class="muted empty">暂无动态</div>
         </div>
       </n-card>
 
+      <TaskLifecycleFilm class="panel block span2" :task="task" :timeline="timeline" mini />
+
       <n-card class="panel block span2" :bordered="false">
         <div class="block-head">
-          <div>
-            <div class="h2">交付物</div>
-            <div class="muted meta">清单 {{ checklistDoneCount }}/{{ checklist.length }} · 交付物 {{ deliverableDoneCount }}/{{ deliverables.length }}</div>
-          </div>
-          <div class="deliverHeadActions">
-            <button class="btnPrimary" :disabled="!canEdit" @click="openDeliverableCreate">新增交付物</button>
-          </div>
+          <div class="h2">验收清单</div>
+          <div class="muted meta">{{ checklistDoneCount }}/{{ checklist.length }}</div>
         </div>
 
-        <div class="deliverGrid">
-          <section class="deliverCol">
-            <div class="deliverSubHead">
-              <div class="subTitle">验收清单</div>
-              <div class="muted subMeta">{{ checklistDoneCount }}/{{ checklist.length }}</div>
-            </div>
+        <div class="checkComposer">
+          <n-input
+            v-model:value="checklistDraft"
+            :disabled="!canEdit"
+            placeholder="新增一条可检查的验收点…"
+            @keyup.enter="addChecklistItem"
+          />
+          <button class="btnGhost" :disabled="addingChecklist || !canEdit" @click="addChecklistItem">
+            <span>添加</span>
+            <span v-if="addingChecklist" class="ml-2 inline-block h-4 w-4 rounded-full border-2 border-black/15 border-t-black/55 animate-spin" />
+          </button>
+        </div>
 
-            <div class="checkComposer">
-              <n-input
-                v-model:value="checklistDraft"
-                :disabled="!canEdit"
-                placeholder="新增一条可检查的验收点…"
-                @keyup.enter="addChecklistItem"
-              />
-              <button class="btnGhost" :disabled="addingChecklist || !canEdit" @click="addChecklistItem">
-                <span>添加</span>
-                <span v-if="addingChecklist" class="ml-2 inline-block h-4 w-4 rounded-full border-2 border-black/15 border-t-black/55 animate-spin" />
-              </button>
-            </div>
-
-            <n-spin :show="checklistLoading">
-              <div v-if="!checklist.length && !checklistLoading" class="muted empty">暂无清单</div>
-              <div v-else class="checkList">
-                <div v-for="i in checklist" :key="i.id" class="checkRow" :class="{ done: Number(i.isDone || 0) === 1 }">
-                  <div class="checkLeft">
-                    <n-checkbox :checked="Number(i.isDone || 0) === 1" :disabled="!canEdit" @update:checked="() => toggleChecklistDone(i)" />
-                    <div class="checkMain">
-                      <div class="checkText">{{ i.content }}</div>
-                      <div class="muted checkMeta">
-                        <span v-if="i.username">{{ i.username }}</span>
-                        <span v-if="i.createTime"> · {{ fmt(Date.parse(i.createTime)) }}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="checkActions">
-                    <button class="btnLink danger" :disabled="!canEdit" @click="removeChecklistItem(i)">删除</button>
+        <n-spin :show="checklistLoading">
+          <div v-if="!checklist.length && !checklistLoading" class="muted empty">暂无清单</div>
+          <div v-else class="checkList">
+            <div v-for="i in checklist" :key="i.id" class="checkRow" :class="{ done: Number(i.isDone || 0) === 1 }">
+              <div class="checkLeft">
+                <n-checkbox :checked="Number(i.isDone || 0) === 1" :disabled="!canEdit" @update:checked="() => toggleChecklistDone(i)" />
+                <div class="checkMain">
+                  <div class="checkText">{{ i.content }}</div>
+                  <div class="muted checkMeta">
+                    <span v-if="i.username">{{ i.username }}</span>
+                    <span v-if="i.createTime"> · {{ fmt(Date.parse(i.createTime)) }}</span>
                   </div>
                 </div>
               </div>
-            </n-spin>
-          </section>
-
-          <section class="deliverCol">
-            <div class="deliverSubHead">
-              <div class="subTitle">交付物列表</div>
-              <div class="muted subMeta">{{ deliverableDoneCount }}/{{ deliverables.length }}</div>
-            </div>
-
-            <n-spin :show="deliverablesLoading">
-              <div v-if="!deliverables.length && !deliverablesLoading" class="muted empty">暂无交付物</div>
-              <div v-else class="deliverList" @dragover.prevent="onDeliverableListDragOver" @drop.prevent="onDeliverableDrop(null)">
-                <div
-                  v-for="d in deliverables"
-                  :key="d.id"
-                  class="deliverRow"
-                  :class="{
-                    done: String(d.status || '').toUpperCase() === 'DONE',
-                    dragOver: deliverableDrop?.id === d.id
-                  }"
-                  :draggable="canEdit"
-                  @dragstart.stop="onDeliverableDragStart(d.id)"
-                  @dragend.stop="onDeliverableDragEnd"
-                  @dragover.prevent="(e) => onDeliverableDragOver(e, d.id)"
-                  @drop.prevent="onDeliverableDrop(d.id)"
-                >
-                  <div class="dragGrip" aria-hidden="true"></div>
-                  <div class="deliverMain">
-                    <div class="deliverTop">
-                      <div class="deliverTitle">{{ d.title }}</div>
-                      <div class="deliverBadges">
-                        <span class="badge">{{ String(d.type || '').toUpperCase() }}</span>
-                        <span class="badge status" :class="{ ok: String(d.status || '').toUpperCase() === 'DONE' }">
-                          {{ String(d.status || 'PENDING').toUpperCase() === 'DONE' ? 'DONE' : 'PENDING' }}
-                        </span>
-                      </div>
-                    </div>
-                    <div v-if="d.url" class="muted deliverMeta">
-                      <a class="deliverLink" :href="d.url || undefined" target="_blank" rel="noreferrer">{{ d.url }}</a>
-                    </div>
-                    <div v-else-if="d.content" class="muted deliverMeta">{{ String(d.content).slice(0, 120) }}<span v-if="String(d.content).length > 120">…</span></div>
-                    <div class="muted deliverMeta">
-                      <span v-if="d.username">{{ d.username }}</span>
-                      <span v-if="d.createTime"> · {{ fmt(Date.parse(d.createTime)) }}</span>
-                    </div>
-                  </div>
-                  <div class="deliverActions">
-                    <button class="btnLink" @click="openDeliverableEdit(d)">{{ String(d.type || '').toUpperCase() === 'DOC' ? '查看' : '编辑' }}</button>
-                    <button class="btnLink" :disabled="!canEdit" @click="toggleDeliverableDone(d)">
-                      {{ String(d.status || '').toUpperCase() === 'DONE' ? '恢复' : '完成' }}
-                    </button>
-                    <button class="btnLink danger" :disabled="!canEdit" @click="removeDeliverable(d)">删除</button>
-                  </div>
-                </div>
+              <div class="checkActions">
+                <button class="btnLink danger" :disabled="!canEdit" @click="removeChecklistItem(i)">删除</button>
               </div>
-            </n-spin>
-          </section>
-        </div>
+            </div>
+          </div>
+        </n-spin>
       </n-card>
 
       <n-card class="panel block span2" :bordered="false">
         <div class="block-head">
-          <div class="h2">{{ Number(task?.parentTaskId || 0) > 0 ? 'Epic' : 'Subtasks' }}</div>
-          <div class="muted meta">{{ Number(task?.parentTaskId || 0) > 0 ? '' : subtasks.length }}</div>
-          <div v-if="Number(task?.parentTaskId || 0) === 0" class="ml-auto">
-            <button class="btnTealSm" :disabled="!canEdit" @click="openSubtaskCreate">新增子任务</button>
+          <div class="h2">交付物</div>
+          <div class="muted meta">{{ deliverableDoneCount }}/{{ deliverables.length }}</div>
+          <div class="ml-auto">
+            <button class="btnPrimary" :disabled="!canEdit" @click="openDeliverableCreate">新增交付物</button>
           </div>
         </div>
 
+        <n-spin :show="deliverablesLoading">
+          <div v-if="!deliverables.length && !deliverablesLoading" class="muted empty">暂无交付物</div>
+          <div v-else class="deliverList" @dragover.prevent="onDeliverableListDragOver" @drop.prevent="onDeliverableDrop(null)">
+            <div
+              v-for="d in deliverables"
+              :key="d.id"
+              class="deliverRow"
+              :class="{
+                done: String(d.status || '').toUpperCase() === 'DONE',
+                dragOver: deliverableDrop?.id === d.id
+              }"
+              :draggable="canEdit"
+              @dragstart.stop="onDeliverableDragStart(d.id)"
+              @dragend.stop="onDeliverableDragEnd"
+              @dragover.prevent="(e) => onDeliverableDragOver(e, d.id)"
+              @drop.prevent="onDeliverableDrop(d.id)"
+            >
+              <div class="dragGrip" aria-hidden="true"></div>
+              <div class="deliverMain">
+                <div class="deliverTop">
+                  <div class="deliverTitle">{{ d.title }}</div>
+                  <div class="deliverBadges">
+                    <span class="badge">{{ deliverableTypeLabel(d.type) }}</span>
+                    <span class="badge status" :class="{ ok: String(d.status || '').toUpperCase() === 'DONE' }">
+                      {{ String(d.status || 'PENDING').toUpperCase() === 'DONE' ? '已完成' : '待处理' }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="d.url" class="muted deliverMeta">
+                  <a class="deliverLink" :href="d.url || undefined" target="_blank" rel="noreferrer">{{ d.url }}</a>
+                </div>
+                <div v-else-if="d.content" class="muted deliverMeta">{{ String(d.content).slice(0, 120) }}<span v-if="String(d.content).length > 120">…</span></div>
+                <div class="muted deliverMeta">
+                  <span v-if="d.username">{{ d.username }}</span>
+                  <span v-if="d.createTime"> · {{ fmt(Date.parse(d.createTime)) }}</span>
+                </div>
+              </div>
+              <div class="deliverActions">
+                <button class="btnLink" @click="openDeliverableEdit(d)">{{ String(d.type || '').toUpperCase() === 'DOC' ? '查看' : '编辑' }}</button>
+                <button class="btnLink" :disabled="!canEdit" @click="toggleDeliverableDone(d)">
+                  {{ String(d.status || '').toUpperCase() === 'DONE' ? '恢复' : '完成' }}
+                </button>
+                <button class="btnLink danger" :disabled="!canEdit" @click="removeDeliverable(d)">删除</button>
+              </div>
+            </div>
+          </div>
+        </n-spin>
+      </n-card>
+
+      <n-card class="panel block span2 workCard" :bordered="false">
+        <n-tabs v-model:value="workTab" type="line" size="medium" class="workTabs">
+          <n-tab-pane name="sub" :tab="isSubtask ? '父任务' : `子任务 · ${subtaskDoneCount}/${subtaskTotalCount}`">
+            <div v-if="!isSubtask" class="workToolbar">
+              <span class="muted workToolbarHint">{{ subtaskTotalCount ? `已完成 ${subtaskDoneCount} / 共 ${subtaskTotalCount}` : '点击任务名跳转' }}</span>
+              <button v-if="comments.length" class="workChip" type="button" @click="workTab = 'discuss'">
+                <span class="workChipN">{{ comments.length }}</span>
+                <span>条讨论</span>
+              </button>
+              <div class="ml-auto flex items-center gap-2">
+                <button
+                  class="btnGhost"
+                  :disabled="!canEdit || completingSubtasks || !subtaskTotalCount || subtaskDoneCount === subtaskTotalCount"
+                  @click="completeIncompleteSubtasks"
+                >
+                  完成未完成
+                </button>
+                <button class="btnTealSm" :disabled="!canEdit" @click="openSubtaskCreate">新增子任务</button>
+              </div>
+            </div>
+
         <n-spin :show="subtasksLoading || parentTaskLoading">
-          <div v-if="Number(task?.parentTaskId || 0) > 0" class="subtaskList">
+          <div v-if="isSubtask" class="subtaskList">
             <button v-if="parentTask" class="subtaskRow" @click="goTask(parentTask.id)">
               <div class="subtaskMain">
                 <div class="subtaskTitle">{{ parentTask.title }}</div>
-                <span class="subtaskBadge">{{ parentTask.status }}</span>
+                <span class="subtaskBadge" :class="String(parentTask.status || '').toLowerCase()">{{ statusLabel(parentTask.status) }}</span>
               </div>
               <div class="muted subtaskMeta">#{{ parentTask.id }}</div>
             </button>
@@ -1332,21 +1559,16 @@ async function removeTask() {
             <button v-for="st in subtasks" :key="st.id" class="subtaskRow" @click="goTask(st.id)">
               <div class="subtaskMain">
                 <div class="subtaskTitle">{{ st.title }}</div>
-                <span class="subtaskBadge">{{ st.status }}</span>
+                <span class="subtaskBadge" :class="String(st.status || '').toLowerCase()">{{ statusLabel(st.status) }}</span>
               </div>
               <div class="muted subtaskMeta">#{{ st.id }}</div>
             </button>
           </div>
         </n-spin>
-      </n-card>
+          </n-tab-pane>
 
-      <n-card class="panel block span2" :bordered="false">
-        <div class="block-head">
-          <div class="h2">讨论</div>
-          <div class="muted meta">{{ comments.length }}</div>
-        </div>
-
-        <div class="attachBox">
+          <n-tab-pane name="discuss" :tab="`讨论 · ${comments.length}`">
+            <div class="attachBox">
           <div class="attachHead">
             <div class="attachTitleWrap">
               <div class="muted label">附件</div>
@@ -1443,6 +1665,8 @@ async function removeTask() {
             <div v-if="!comments.length && !commentsLoading" class="muted empty">暂无评论</div>
           </div>
         </n-spin>
+          </n-tab-pane>
+        </n-tabs>
       </n-card>
     </div>
 
@@ -1475,8 +1699,8 @@ async function removeTask() {
               <n-select
                 v-model:value="deliverableType"
                 :options="[
-                  { label: 'LINK', value: 'LINK' },
-                  { label: 'DOC', value: 'DOC' },
+                  { label: '链接', value: 'LINK' },
+                  { label: '文档', value: 'DOC' },
                   { label: 'PR', value: 'PR' }
                 ]"
                 :disabled="!canEdit"
@@ -1559,6 +1783,41 @@ async function removeTask() {
   margin-bottom: 16px;
 }
 
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.crumb {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: -0.2px;
+  color: rgba(15, 23, 42, 0.60);
+  cursor: pointer;
+}
+
+.crumb:hover {
+  color: rgba(15, 23, 42, 0.86);
+}
+
+.sep {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.30);
+}
+
+.crumbCur {
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: -0.2px;
+  color: rgba(15, 23, 42, 0.78);
+}
+
 .right {
   display: flex;
   gap: 10px;
@@ -1588,21 +1847,21 @@ async function removeTask() {
 }
 
 .pill.watch {
-  border-color: rgba(20, 184, 166, 0.18);
-  background: rgba(20, 184, 166, 0.10);
-  color: rgba(13, 148, 136, 0.95);
+  border-color: rgba(var(--accent-rgb), 0.14);
+  background: rgba(var(--accent-rgb), 0.05);
+  color: rgba(15, 23, 42, 0.86);
 }
 
 .pill.edit {
-  border-color: rgba(6, 182, 212, 0.18);
-  background: rgba(6, 182, 212, 0.10);
-  color: rgba(8, 145, 178, 0.98);
+  border-color: rgba(var(--accent2-rgb), 0.14);
+  background: rgba(var(--accent2-rgb), 0.05);
+  color: rgba(15, 23, 42, 0.86);
 }
 
 .panel {
-  background: rgba(255, 255, 255, 0.82);
-  border: 0;
-  box-shadow: 0 16px 44px rgba(2, 6, 23, 0.08);
+  background: rgba(255, 255, 255, 0.70);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 16px 44px rgba(2, 6, 23, 0.07);
   backdrop-filter: blur(12px);
 }
 
@@ -1655,15 +1914,72 @@ async function removeTask() {
   flex-shrink: 0;
 }
 
+.subtaskBadge.todo {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(148, 163, 184, 0.14);
+  color: rgba(51, 65, 85, 0.92);
+}
+
+.subtaskBadge.doing {
+  border: 1px solid rgba(var(--accent2-rgb), 0.14);
+  background: rgba(var(--accent2-rgb), 0.05);
+  color: rgba(15, 23, 42, 0.86);
+}
+
+.subtaskBadge.done {
+  border: 1px solid rgba(var(--accent-rgb), 0.14);
+  background: rgba(var(--accent-rgb), 0.05);
+  color: rgba(15, 23, 42, 0.82);
+}
+
+.subStat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.04);
+  font-size: 12.5px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.subDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.20);
+  flex-shrink: 0;
+}
+
+.subStat.done .subDot {
+  background: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.12);
+}
+
+.subDone {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.subStat.done .subDone {
+  color: #16a34a;
+}
+
+.hint {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
 .subtaskMeta {
   font-size: 12px;
   flex-shrink: 0;
 }
 
 .cRow.focus {
-  border-color: rgba(20, 184, 166, 0.38);
-  box-shadow: 0 18px 60px rgba(2, 6, 23, 0.10);
-  background: radial-gradient(900px 220px at 20% 0%, rgba(6, 182, 212, 0.10), transparent 60%), rgba(255, 255, 255, 0.95);
+  border-color: rgba(var(--accent-rgb), 0.18);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 8px 24px -8px rgba(17, 24, 39, 0.08);
+  background: #fff;
 }
 
 .btnPrimary {
@@ -1672,7 +1988,7 @@ async function removeTask() {
   justify-content: center;
   padding: 9px 12px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  background: var(--brand);
   color: #ffffff;
   border: 1px solid rgba(15, 23, 42, 0.12);
   font-size: 13px;
@@ -1683,9 +1999,9 @@ async function removeTask() {
 }
 
 .btnPrimary:hover {
-  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  background: var(--brand-hover);
   transform: translateY(-1px);
-  box-shadow: 0 16px 50px rgba(20, 184, 166, 0.20);
+  box-shadow: 0 8px 24px rgba(30, 64, 175, 0.16);
 }
 
 .btnPrimary:disabled {
@@ -1718,7 +2034,7 @@ async function removeTask() {
   padding: 9px 12px;
   border-radius: 12px;
   border: 0;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  background: var(--brand);
   color: rgba(255, 255, 255, 0.96);
   font-size: 13px;
   font-weight: 860;
@@ -1729,7 +2045,7 @@ async function removeTask() {
 
 .btnTealSm:hover {
   transform: translateY(-1px);
-  box-shadow: 0 16px 50px rgba(20, 184, 166, 0.18);
+  box-shadow: 0 16px 50px rgba(var(--accent-rgb), 0.12);
 }
 
 .btnTealSm:disabled {
@@ -1816,9 +2132,244 @@ async function removeTask() {
   font-size: 12px;
 }
 
+.collabContext {
+  padding: 16px 16px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.workCard {
+  padding: 16px 16px 14px;
+}
+
+.workCard :deep(.n-tabs-nav) {
+  margin-bottom: 4px;
+}
+
+.workToolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.workToolbarHint {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.04);
+  color: rgba(15, 23, 42, 0.62);
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.workChip:hover {
+  background: rgba(15, 23, 42, 0.10);
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.workChipN {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.workCard :deep(.n-tabs-tab) {
+  font-weight: 600;
+}
+
+.workCard :deep(.n-tabs-tab--active) {
+  font-weight: 700;
+}
+
+.collabActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.collabHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 14px;
+  align-items: start;
+  padding: 14px 14px;
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.86);
+  border: none;
+}
+
+.collabHeadline {
+  font-size: 22px;
+  line-height: 1.08;
+  font-weight: 900;
+  letter-spacing: -0.5px;
+  color: rgba(15, 23, 42, 0.94);
+}
+
+.collabHint {
+  margin-top: 8px;
+  max-width: 620px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.collabSignalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.collabSignalCard {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.collabSignalLabel {
+  font-size: 11px;
+}
+
+.collabSignalValue {
+  margin-top: 8px;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: -0.45px;
+  color: rgba(15, 23, 42, 0.94);
+}
+
+.collabMatrix {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.collabPanel {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.84);
+  border: none;
+}
+
+.collabPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.memberStack,
+.signalList,
+.collabSummaryList {
+  display: grid;
+  gap: 8px;
+}
+
+.collabPill {
+  min-height: 28px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.68);
+  color: rgba(51, 65, 85, 0.84);
+  font-size: 12px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.collabPill.strong {
+  background: rgba(219, 234, 254, 0.78);
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.collabSummaryRow,
+.signalRow {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.collabSummaryRow:first-child,
+.signalRow:first-child {
+  padding-top: 0;
+}
+
+.collabSummaryRow:last-child,
+.signalRow:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.collabSummaryRow {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.signalTitle {
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.45;
+  color: rgba(15, 23, 42, 0.88);
+}
+
+.signalMeta {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.collabEmpty {
+  font-size: 12px;
+}
+
 .form {
   display: grid;
   gap: 12px;
+}
+
+.formGroup {
+  display: grid;
+  gap: 12px;
+}
+
+.formGroup + .formGroup {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(15, 23, 42, 0.10);
+}
+
+.groupLabel {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: rgba(15, 23, 42, 0.45);
 }
 
 .row2 {
@@ -1872,11 +2423,10 @@ async function removeTask() {
 .attachBox {
   margin-top: 10px;
   margin-bottom: 12px;
-  border-radius: 18px;
-  background:
-    radial-gradient(560px 180px at 0% 0%, rgba(20, 184, 166, 0.10), transparent 58%),
-    rgba(255, 255, 255, 0.76);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 12px 30px rgba(2, 6, 23, 0.05);
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
   padding: 12px 12px;
 }
 
@@ -1960,8 +2510,8 @@ async function removeTask() {
   height: 22px;
   padding: 0 10px;
   border-radius: 999px;
-  background: rgba(20, 184, 166, 0.12);
-  color: rgba(13, 148, 136, 0.92);
+  background: rgba(var(--accent-rgb), 0.06);
+  color: rgba(15, 23, 42, 0.84);
   font-size: 11px;
   font-weight: 900;
   letter-spacing: -0.1px;
@@ -1980,12 +2530,12 @@ async function removeTask() {
 }
 
 .btnLink.preview {
-  color: rgba(13, 148, 136, 0.88);
+  color: rgba(15, 23, 42, 0.78);
 }
 
 .btnLink.preview:hover {
-  background: rgba(20, 184, 166, 0.10);
-  color: rgba(13, 148, 136, 1);
+  background: rgba(var(--accent-rgb), 0.06);
+  color: rgba(15, 23, 42, 0.92);
 }
 
 .btnLink.danger {
@@ -2041,7 +2591,7 @@ async function removeTask() {
 
 .cRow.reply {
   margin-left: 18px;
-  border-color: rgba(20, 184, 166, 0.18);
+  border-color: rgba(var(--accent-rgb), 0.12);
 }
 
 .cAvatar {
@@ -2132,35 +2682,55 @@ async function removeTask() {
 }
 
 .titem {
-  border-radius: 14px;
-  border: 1px solid var(--stroke2);
-  background: rgba(255, 255, 255, 0.62);
-  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
 }
 
-.tt {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: baseline;
+.titem:last-child {
+  border-bottom: 0;
+}
+
+.tDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+
+.tMain {
+  min-width: 0;
 }
 
 .tlabel {
-  font-weight: 700;
-  letter-spacing: -0.2px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.1px;
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.tdetail {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.55);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .ttime {
   font-size: 12px;
   white-space: nowrap;
-}
-
-.tdetail {
-  margin-top: 8px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: rgba(15, 23, 42, 0.86);
-  white-space: pre-wrap;
+  color: rgba(15, 23, 42, 0.40);
 }
 
 .deliverHeadActions {
@@ -2224,8 +2794,8 @@ async function removeTask() {
 }
 
 .checkRow.done {
-  background: rgba(20, 184, 166, 0.06);
-  border-color: rgba(20, 184, 166, 0.14);
+  background: rgba(var(--accent-rgb), 0.04);
+  border-color: rgba(var(--accent-rgb), 0.10);
 }
 
 .checkLeft {
@@ -2278,7 +2848,7 @@ async function removeTask() {
 }
 
 .deliverRow.dragOver {
-  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.18);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12);
 }
 
 .dragGrip {
@@ -2295,8 +2865,8 @@ async function removeTask() {
 }
 
 .deliverRow.done {
-  background: rgba(20, 184, 166, 0.06);
-  border-color: rgba(20, 184, 166, 0.14);
+  background: rgba(var(--accent-rgb), 0.04);
+  border-color: rgba(var(--accent-rgb), 0.10);
 }
 
 .deliverTop {
@@ -2342,8 +2912,8 @@ async function removeTask() {
 }
 
 .badge.status.ok {
-  background: rgba(20, 184, 166, 0.12);
-  color: rgba(13, 148, 136, 0.92);
+  background: rgba(var(--accent-rgb), 0.06);
+  color: rgba(15, 23, 42, 0.86);
 }
 
 .deliverMeta {
@@ -2353,7 +2923,7 @@ async function removeTask() {
 }
 
 .deliverLink {
-  color: rgba(13, 148, 136, 0.92);
+  color: rgba(15, 23, 42, 0.86);
   text-decoration: none;
 }
 
@@ -2397,8 +2967,8 @@ async function removeTask() {
 }
 
 .docTab.active {
-  background: rgba(20, 184, 166, 0.12);
-  color: rgba(13, 148, 136, 0.95);
+  background: rgba(var(--accent-rgb), 0.06);
+  color: rgba(15, 23, 42, 0.92);
 }
 
 .docPreview {
@@ -2428,6 +2998,15 @@ async function removeTask() {
   .row2 {
     grid-template-columns: 1fr;
   }
+  .collabHero,
+  .collabMatrix,
+  .collabSignalGrid {
+    grid-template-columns: 1fr;
+  }
+  .collabActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
   .timelineScroll {
     max-height: none;
     overflow: visible;
@@ -2454,6 +3033,352 @@ async function removeTask() {
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+}
+
+/* Task page: one focused work surface, with neutral controls and a quiet inspector. */
+.detail-page {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-bottom: 56px;
+}
+
+.top {
+  align-items: center;
+  padding: 16px 0 18px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.top .h1 {
+  max-width: min(720px, 58vw);
+  font-size: clamp(24px, 2.1vw, 34px);
+  line-height: 1.12;
+  letter-spacing: -0.8px;
+}
+
+.h1Line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.taskNo {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.32);
+  white-space: nowrap;
+}
+
+.right {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.panel {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  border-radius: 14px;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.grid {
+  grid-template-columns: minmax(0, 1.45fr) minmax(310px, 0.72fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.block {
+  padding: 20px;
+}
+
+.block-head {
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.grid > .block:first-child {
+  min-height: 100%;
+}
+
+.grid > .block:nth-child(2) {
+  position: sticky;
+  top: 82px;
+}
+
+.collabContext {
+  display: none;
+}
+
+.noteBox,
+.composer {
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  padding: 10px;
+}
+
+.btnPrimary,
+.btnTealSm {
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.btnPrimary:hover,
+.btnTealSm:hover {
+  background: var(--brand-hover);
+  box-shadow: none;
+}
+
+.btnGhost {
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.subtaskRow,
+.checkRow,
+.deliverRow,
+.fileRow {
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.7);
+  border-color: rgba(15, 23, 42, 0.07);
+  box-shadow: none;
+}
+
+.subtaskRow:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+.timelineScroll {
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+@media (max-width: 980px) {
+  .detail-page {
+    padding: 0;
+  }
+
+  .top,
+  .right {
+    align-items: flex-start;
+  }
+
+  .top {
+    flex-direction: column;
+  }
+
+  .right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .grid > .block:nth-child(2) {
+    position: static;
+  }
+}
+
+/* Task detail: readable editing surface with a restrained collaboration rail. */
+.detail-page {
+  max-width: 1440px;
+  padding: 0 0 72px;
+}
+
+.detail-page > .top {
+  min-height: 88px;
+  padding: 24px 0 20px;
+  margin-bottom: 24px;
+  align-items: center;
+  border-bottom-color: rgba(15, 23, 42, 0.12);
+}
+
+.detail-page > .top .h1 {
+  max-width: min(760px, 58vw);
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: -0.55px;
+  font-weight: 760;
+}
+
+.detail-page .crumbs {
+  margin-bottom: 8px;
+}
+
+.detail-page .crumb,
+.detail-page .crumbCur {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.detail-page > .top .right {
+  gap: 6px;
+}
+
+.detail-page > .top .right .btnGhost,
+.detail-page > .top .right .btnPrimary {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-page > .grid {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 372px);
+  gap: 24px;
+  align-items: start;
+}
+
+.detail-page > .grid > .block {
+  padding: 24px;
+  border-radius: 14px;
+  border-color: rgba(15, 23, 42, 0.10);
+  background: #fff;
+  box-shadow: none;
+}
+
+.detail-page > .grid > .block:first-child {
+  min-width: 0;
+}
+
+.detail-page > .grid > .block:nth-child(2) {
+  position: sticky;
+  top: 74px;
+  min-width: 0;
+  max-height: calc(100vh - 104px);
+  overflow: auto;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.detail-page > .grid > .block.span2 {
+  grid-column: 1 / -1;
+  background: #fff;
+}
+
+.detail-page > .grid > .block .block-head {
+  min-height: 30px;
+  padding-bottom: 13px;
+  margin-bottom: 18px;
+  border-bottom-color: rgba(15, 23, 42, 0.10);
+}
+
+.detail-page > .grid > .block .block-head .h2 {
+  font-size: 15px;
+  line-height: 1.25;
+  font-weight: 760;
+  letter-spacing: -0.15px;
+}
+
+.detail-page .form {
+  gap: 16px;
+}
+
+.detail-page .row2 {
+  gap: 16px;
+}
+
+.detail-page .label {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 680;
+  letter-spacing: 0.1px;
+  color: rgba(15, 23, 42, 0.58);
+}
+
+.detail-page :deep(.n-input),
+.detail-page :deep(.n-base-selection) {
+  --n-border: rgba(15, 23, 42, 0.12) !important;
+  --n-border-hover: rgba(15, 23, 42, 0.22) !important;
+  --n-border-focus: rgba(15, 23, 42, 0.30) !important;
+  --n-box-shadow-focus: 0 0 0 2px rgba(15, 23, 42, 0.06) !important;
+  --n-border-radius: 8px !important;
+}
+
+.detail-page .noteBox,
+.detail-page .composer {
+  border-radius: 9px;
+  border-color: rgba(15, 23, 42, 0.09);
+  background: rgba(248, 250, 252, 0.76);
+  box-shadow: none;
+}
+
+.detail-page .subtaskRow,
+.detail-page .checkRow,
+.detail-page .deliverRow,
+.detail-page .fileRow {
+  padding: 12px 0;
+  border-radius: 0;
+  border-width: 0 0 1px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.detail-page .subtaskRow:last-child,
+.detail-page .checkRow:last-child,
+.detail-page .deliverRow:last-child,
+.detail-page .fileRow:last-child {
+  border-bottom: 0;
+}
+
+.detail-page .timelineScroll {
+  max-height: 430px;
+  padding-right: 8px;
+}
+
+.detail-page .cRow,
+.detail-page .actRow {
+  border-radius: 9px;
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow: none;
+}
+
+.detail-page .btnPrimary,
+.detail-page .btnTealSm {
+  background: var(--brand);
+  border-color: var(--brand);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.detail-page .btnPrimary:hover,
+.detail-page .btnTealSm:hover {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+  box-shadow: none;
+}
+
+.detail-page .btnGhost {
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (max-width: 980px) {
+  .detail-page {
+    padding: 0 0 56px;
+  }
+
+  .detail-page > .top {
+    align-items: flex-start;
+  }
+
+  .detail-page > .top .h1 {
+    max-width: none;
+    font-size: 25px;
+  }
+
+  .detail-page > .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-page > .grid > .block:nth-child(2) {
+    position: static;
+    max-height: none;
   }
 }
 </style>

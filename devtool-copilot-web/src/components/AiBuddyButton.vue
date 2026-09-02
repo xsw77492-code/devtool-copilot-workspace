@@ -29,7 +29,7 @@ function clamp(v: number, min: number, max: number) {
 function setPos(x: number, y: number) {
   const w = window.innerWidth
   const h = window.innerHeight
-  const bw = 56
+  const bw = 64
   const bh = 56
   const nx = clamp(x, 8, Math.max(8, w - bw - 8))
   const ny = clamp(y, 8, Math.max(8, h - bh - 8))
@@ -98,7 +98,7 @@ function initPos() {
     }
   } catch {
   }
-  const x = Math.round(window.innerWidth / 2 - 28)
+  const x = Math.round(window.innerWidth / 2 - 32)
   const y = 8
   setPos(x, y)
 }
@@ -122,7 +122,7 @@ onBeforeUnmount(() => {
   <button
     class="buddy"
     type="button"
-    aria-label="AI 小精灵"
+    aria-label="AI 小鲨鱼"
     :class="{ dragging }"
     :style="buddyStyle"
     @click="onClick"
@@ -131,84 +131,43 @@ onBeforeUnmount(() => {
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
   >
-    <svg class="sprite" width="56" height="56" viewBox="0 0 46 46" fill="none" aria-hidden="true">
+    <svg class="sprite" width="64" height="56" viewBox="0 0 64 56" fill="none" aria-hidden="true">
       <defs>
-        <linearGradient id="dtc_ai_g" x1="8" y1="8" x2="38" y2="38" gradientUnits="userSpaceOnUse">
-          <stop stop-color="var(--accent2)" stop-opacity="0.92" />
-          <stop offset="1" stop-color="var(--accent)" stop-opacity="0.92" />
+        <linearGradient id="dtc_shark_body" x1="12" y1="16" x2="52" y2="42" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#466477" />
+          <stop offset="1" stop-color="#263d51" />
         </linearGradient>
-        <linearGradient id="dtc_ai_shade" x1="12" y1="12" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-          <stop stop-color="rgba(255,255,255,0.55)" />
-          <stop offset="1" stop-color="rgba(255,255,255,0.00)" />
+        <linearGradient id="dtc_shark_belly" x1="25" y1="27" x2="47" y2="42" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#f5f8f4" />
+          <stop offset="1" stop-color="#d9e6e1" />
         </linearGradient>
       </defs>
 
-      <path
-        d="M14.2 9.4c4.8-3.2 12.8-3.2 17.6 0 4.4 2.9 6.6 7 6.6 12.4v3.4c0 5.4-2.2 9.5-6.6 12.4-4.8 3.2-12.8 3.2-17.6 0-4.4-2.9-6.6-7-6.6-12.4v-3.4c0-5.4 2.2-9.5 6.6-12.4Z"
-        fill="url(#dtc_ai_g)"
-        stroke="rgba(15,23,42,0.08)"
-        stroke-width="1"
-        stroke-linejoin="round"
-        opacity="0.92"
-      />
-
-      <path
-        d="M16.2 16.6c1.7-1.1 3.9-1.7 6.8-1.7 2.9 0 5.1.6 6.8 1.7 1.8 1.2 2.7 2.9 2.7 5.0v4.8c0 2.1-.9 3.8-2.7 5-1.7 1.1-3.9 1.7-6.8 1.7-2.9 0-5.1-.6-6.8-1.7-1.8-1.2-2.7-2.9-2.7-5v-4.8c0-2.1.9-3.8 2.7-5Z"
-        fill="rgba(255,255,255,0.90)"
-        stroke="rgba(15,23,42,0.10)"
-        stroke-width="1"
-        stroke-linejoin="round"
-      />
-
-      <path
-        d="M14.8 20.2c2.2-2.8 4.9-4.2 8.2-4.2s6 1.4 8.2 4.2c-1.2.2-2.4.0-3.6-.5-1.5-.7-3-1-4.6-1-1.6 0-3.2.3-4.6 1-1.2.5-2.4.7-3.6.5Z"
-        fill="rgba(15,23,42,0.68)"
-      />
-
-      <path
-        d="M18.0 23.6c1.1-.8 2.5-1.2 4.0-1.2 1.5 0 2.9.4 4.0 1.2"
-        stroke="rgba(15,23,42,0.22)"
-        stroke-width="1"
-        stroke-linecap="round"
-      />
-
-      <ellipse class="eye e1" cx="19.7" cy="26.2" rx="1.35" ry="1.35" fill="url(#dtc_ai_g)" />
-      <ellipse class="eye e2" cx="26.3" cy="26.2" rx="1.35" ry="1.35" fill="url(#dtc_ai_g)" />
-
-      <path
-        d="M20.3 30.2c.9.9 1.8 1.3 2.7 1.3 1.1 0 2.1-.4 2.9-1.3"
-        stroke="url(#dtc_ai_g)"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
-
-      <path
-        d="M16.4 29.2c1.2.7 2.4 1 3.6 1"
-        stroke="rgba(6,182,212,0.20)"
-        stroke-width="2.2"
-        stroke-linecap="round"
-      />
-      <path
-        d="M29.6 29.2c-1.2.7-2.4 1-3.6 1"
-        stroke="rgba(20,184,166,0.20)"
-        stroke-width="2.2"
-        stroke-linecap="round"
-      />
-
-      <path
-        d="M14.2 9.4c4.8-3.2 12.8-3.2 17.6 0 4.4 2.9 6.6 7 6.6 12.4v3.4c0 5.4-2.2 9.5-6.6 12.4-4.8 3.2-12.8 3.2-17.6 0-4.4-2.9-6.6-7-6.6-12.4v-3.4c0-5.4 2.2-9.5 6.6-12.4Z"
-        fill="url(#dtc_ai_shade)"
-        opacity="0.9"
-      />
-
-      <path
-        class="spark"
-        d="M33.6 13.4l.9-2 1 2 2 .9-2 1-.9 2-1-2-2-1 2-.9Z"
-        fill="url(#dtc_ai_g)"
-        opacity="0.65"
-      />
+      <ellipse class="water-shadow" cx="34" cy="47" rx="19" ry="3" fill="rgba(27, 55, 70, 0.14)" />
+      <g class="shark">
+        <path class="tail" d="M27 40 32 51 37 40Z" fill="#304b60" />
+        <path class="dorsal-fin" d="M27 17 32 8l5 9Z" fill="#36576b" />
+        <path class="side-fin side-fin-left" d="M14 32 4 39c-2 2-1 3 1 3l14-4Z" fill="#38596b" />
+        <path class="side-fin side-fin-right" d="M50 32 60 39c2 2 1 3-1 3l-14-4Z" fill="#38596b" />
+        <path class="body" d="M32 14c13 0 23 7 24 18-1 11-11 18-24 18S9 43 8 32c1-11 11-18 24-18Z" fill="url(#dtc_shark_body)" stroke="#1c3447" stroke-width="1.2" />
+        <path class="belly" d="M15 35c5 7 11 10 17 10s12-3 17-10c-3 9-9 13-17 13s-14-4-17-13Z" fill="url(#dtc_shark_belly)" />
+        <path class="gill" d="M18 28c2 2 2 5 0 8M22 27c2 3 2 6 0 9M46 28c-2 2-2 5 0 8M42 27c-2 3-2 6 0 9" stroke="#1e3748" stroke-width="1.1" stroke-linecap="round" opacity=".8" />
+        <circle class="eye" cx="23" cy="27" r="4" fill="#f4f8f5" />
+        <circle class="eye" cx="41" cy="27" r="4" fill="#f4f8f5" />
+        <circle class="eye-pupil" cx="23" cy="27" r="1.8" fill="#193348" />
+        <circle class="eye-pupil" cx="41" cy="27" r="1.8" fill="#193348" />
+        <circle class="eye-glint" cx="23.7" cy="26.2" r=".7" fill="#fff" />
+        <circle class="eye-glint" cx="41.7" cy="26.2" r=".7" fill="#fff" />
+        <path class="smile" d="M27 35c3 3 7 3 10 0" stroke="#d6eee6" stroke-width="1.3" stroke-linecap="round" />
+        <circle class="cheek" cx="17.5" cy="34" r="1.4" fill="#91d1bc" opacity=".75" />
+        <circle class="cheek" cx="46.5" cy="34" r="1.4" fill="#91d1bc" opacity=".75" />
+      </g>
+      <g class="bubbles" fill="#77bda9">
+        <circle cx="12" cy="12" r="1.5" />
+        <circle cx="8" cy="7" r="1" />
+      </g>
     </svg>
-    <span class="tip" aria-hidden="true">问 AI</span>
+    <span class="tip" aria-hidden="true">问问AI</span>
   </button>
 </template>
 
@@ -217,9 +176,9 @@ onBeforeUnmount(() => {
   position: fixed;
   left: 0;
   top: 0;
-  width: 56px;
+  width: 64px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: 18px;
   border: 1px solid transparent;
   background: transparent;
   display: grid;
@@ -232,38 +191,65 @@ onBeforeUnmount(() => {
 }
 
 .buddy:hover {
-  filter: drop-shadow(0 18px 48px rgba(15, 23, 42, 0.14));
+  filter: drop-shadow(0 14px 28px rgba(28, 55, 70, 0.2));
 }
 
 .buddy.dragging {
-  filter: drop-shadow(0 22px 56px rgba(15, 23, 42, 0.18));
+  filter: drop-shadow(0 18px 34px rgba(28, 55, 70, 0.24));
 }
 
 .sprite {
   position: relative;
   z-index: 1;
-  transform-origin: 50% 60%;
-  animation: sprite-float 4.4s ease-in-out infinite;
+  width: 64px;
+  height: 56px;
+  overflow: visible;
+  transform-origin: 50% 58%;
+  animation: shark-float 4.8s ease-in-out infinite;
 }
 
 .buddy:hover .sprite {
-  animation-duration: 2.2s;
+  animation-duration: 2.8s;
 }
 
-.buddy:hover .spark {
-  opacity: 0.9;
-  animation: spark-pop 2.6s ease-in-out infinite;
+.shark {
+  transform-origin: 36px 31px;
+  animation: shark-swim 3.2s ease-in-out infinite;
 }
 
 .eye {
-  transform-box: fill-box;
-  transform-origin: center;
   animation: eye-blink 6.2s ease-in-out infinite;
 }
 
-.spark {
-  animation: spark-pop 7.4s ease-in-out infinite;
-  transform-origin: 50% 50%;
+.tail {
+  transform-box: fill-box;
+  transform-origin: 72% 50%;
+  animation: tail-swish 1.2s ease-in-out infinite;
+}
+
+.dorsal-fin,
+.side-fin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fin-drift 2.4s ease-in-out infinite;
+}
+
+.bubbles {
+  transform-origin: center;
+  animation: bubbles-rise 3.8s ease-in-out infinite;
+}
+
+.water-shadow {
+  transform-origin: center;
+  animation: shadow-breathe 4.8s ease-in-out infinite;
+}
+
+.buddy:hover .tail {
+  animation-duration: 560ms;
+}
+
+.buddy:hover .shark {
+  animation-duration: 1.8s;
 }
 
 .buddy:hover .eye {
@@ -273,20 +259,20 @@ onBeforeUnmount(() => {
 .tip {
   position: absolute;
   top: 50%;
-  right: calc(100% + 10px);
-  transform: translateY(-50%) translateX(8px);
+  left: calc(100% + 10px);
+  transform: translateY(-50%) translateX(-8px);
   opacity: 0;
   pointer-events: none;
   padding: 7px 10px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.92);
+  border-radius: 8px;
+  background: rgba(28, 51, 68, 0.95);
   color: rgba(255, 255, 255, 0.92);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: -0.2px;
   white-space: nowrap;
   transition: opacity 160ms ease, transform 160ms ease;
-  box-shadow: 0 14px 44px rgba(2, 6, 23, 0.24);
+  box-shadow: 0 12px 26px rgba(24, 49, 64, 0.2);
 }
 
 .buddy:hover .tip {
@@ -294,31 +280,49 @@ onBeforeUnmount(() => {
   transform: translateY(-50%) translateX(0px);
 }
 
-@keyframes spark-pop {
-  0%,
-  88%,
-  100% {
-    opacity: 0.25;
-    transform: scale(0.92);
-  }
-  92% {
-    opacity: 0.9;
-    transform: scale(1.06);
-  }
-}
-
-@keyframes sprite-float {
+@keyframes shark-float {
   0%,
   82%,
   100% {
-    transform: translateY(0px) rotate(0deg) scale(1);
+    transform: translateY(0px) rotate(0deg);
   }
   88% {
-    transform: translateY(-1px) rotate(-2deg) scale(1.015);
+    transform: translateY(-1px) rotate(-1deg);
   }
   94% {
-    transform: translateY(-2px) rotate(0deg) scale(1.02);
+    transform: translateY(-2px) rotate(0deg);
   }
+}
+
+@keyframes shark-swim {
+  0%,
+  100% { transform: translateX(0) rotate(0deg); }
+  50% { transform: translateX(1px) rotate(-1deg); }
+}
+
+@keyframes tail-swish {
+  0%,
+  100% { transform: rotate(0deg); }
+  50% { transform: rotate(8deg); }
+}
+
+@keyframes fin-drift {
+  0%,
+  100% { transform: rotate(0deg); }
+  50% { transform: rotate(-4deg); }
+}
+
+@keyframes bubbles-rise {
+  0%,
+  100% { opacity: .25; transform: translate(0, 2px); }
+  50% { opacity: .85; transform: translate(1px, -2px); }
+}
+
+@keyframes shadow-breathe {
+  0%,
+  82%,
+  100% { transform: scaleX(1); opacity: .14; }
+  92% { transform: scaleX(.78); opacity: .08; }
 }
 
 @keyframes eye-blink {
@@ -357,7 +361,12 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .buddy,
   .sprite,
-  .spark,
+  .shark,
+  .tail,
+  .dorsal-fin,
+  .side-fin,
+  .bubbles,
+  .water-shadow,
   .eye {
     animation: none !important;
   }

@@ -10,7 +10,7 @@ spring:
       max-request-size: ${ATTACHMENT_MAX_REQUEST_SIZE:60MB}
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${DB_URL:jdbc:mysql://localhost:3306/devtool_copilot?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false}
+    url: ${DB_URL:jdbc:mysql://localhost:3306/devtool_copilot?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:123456}
     hikari:
@@ -69,6 +69,9 @@ ai:
     model: ${DEEPSEEK_MODEL:deepseek-chat}
     temperature: ${DEEPSEEK_TEMPERATURE:0.2}
     timeout-ms: ${DEEPSEEK_TIMEOUT_MS:60000}
+    max-tokens: ${DEEPSEEK_MAX_TOKENS:4096}
+    monthly-token-quota: ${DEEPSEEK_MONTHLY_QUOTA:0}
+    daily-call-limit: ${DEEPSEEK_DAILY_CALL_LIMIT:0}
 
 docgen:
   wenduoduo:

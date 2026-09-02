@@ -1,5 +1,6 @@
 package com.devtoolcopilot.realtime.websocket;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.devtoolcopilot.project.entity.ProjectMemberRole;
 import com.devtoolcopilot.project.mapper.ProjectMemberMapper;
@@ -13,6 +14,9 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,6 +25,11 @@ import java.util.concurrent.CopyOnWriteArraySet;
 @Component
 public class RealtimeSessionHub {
     private static final long OFFLINE_GRACE_SECONDS = 90;
+    /** 团队协作频道：订阅者接收全局团队事件（群组/邀请/成员/动态）与在线成员快照 */
+    private final Set<WebSocketSession> teamSessions = new CopyOnWriteArraySet<>();
+    private final Map<WebSocketSession, Long> teamSessionUsers = new ConcurrentHashMap<>();
+    /** 聊天频道：userId -> 在线 sessions（聊天消息按会话成员精确投递） */
+    private final Map<Long, CopyOnWriteArraySet<WebSocketSession>> chatSessions = new ConcurrentHashMap<>();
     private final Map<Long, CopyOnWriteArraySet<WebSocketSession>> projectSessions = new ConcurrentHashMap<>();
     private final Map<WebSocketSession, Long> sessionUsers = new ConcurrentHashMap<>();
     private final Map<WebSocketSession, Long> sessionProjects = new ConcurrentHashMap<>();
@@ -63,6 +72,9 @@ public class RealtimeSessionHub {
 
     public void removeSession(WebSocketSession session) {
         if (session == null) return;
+        teamSessions.remove(session);
+        teamSessionUsers.remove(session);
+        unsubscribeChat(session);
         Long pid = sessionProjects.get(session);
         if (pid != null) {
             Set<WebSocketSession> set = projectSessions.get(pid);
@@ -105,6 +117,87 @@ public class RealtimeSessionHub {
                 }
             } catch (Exception ignored) {
             }
+        }
+    }
+
+    /** 订阅团队协作频道（独立于项目订阅，两者可并存） */
+    public void subscribeTeam(Long userId, WebSocketSession session) {
+        if (userId == null || session == null) return;
+        teamSessions.add(session);
+        teamSessionUsers.put(session, userId);
+    }
+
+    public void unsubscribeTeam(WebSocketSession session) {
+        if (session == null) return;
+        teamSessions.remove(session);
+        teamSessionUsers.remove(session);
+    }
+
+    /** 向全部团队频道订阅者广播（团队事件为工作区全局可见） */
+    public void broadcastTeam(String text) {
+        if (text == null || teamSessions.isEmpty()) return;
+        TextMessage msg = new TextMessage(text);
+        for (WebSocketSession s : teamSessions) {
+            try {
+                if (s.isOpen()) {
+                    s.sendMessage(msg);
+                } else {
+                    teamSessions.remove(s);
+                    teamSessionUsers.remove(s);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** 订阅聊天频道（按用户维度，接收自己参与会话的实时消息） */
+    public void subscribeChat(Long userId, WebSocketSession session) {
+        if (userId == null || session == null) return;
+        chatSessions.computeIfAbsent(userId, k -> new CopyOnWriteArraySet<>()).add(session);
+    }
+
+    public void unsubscribeChat(WebSocketSession session) {
+        if (session == null) return;
+        for (Set<WebSocketSession> set : chatSessions.values()) {
+            set.remove(session);
+        }
+    }
+
+    /** 聊天消息精确投递：只推送给会话成员中在线的 session */
+    public void broadcastChat(List<Long> userIds, String text) {
+        if (userIds == null || userIds.isEmpty() || text == null) return;
+        Set<Long> target = new HashSet<>(userIds);
+        TextMessage msg = new TextMessage(text);
+        for (Map.Entry<Long, CopyOnWriteArraySet<WebSocketSession>> en : chatSessions.entrySet()) {
+            if (!target.contains(en.getKey())) continue;
+            for (WebSocketSession s : en.getValue()) {
+                try {
+                    if (s.isOpen()) {
+                        s.sendMessage(msg);
+                    } else {
+                        en.getValue().remove(s);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    /** 广播团队在线成员快照（与 teamCenter 口径一致：最近 15 分钟活跃） */
+    public void broadcastTeamPresence() {
+        if (teamSessions.isEmpty()) return;
+        try {
+            LocalDateTime cutoff = LocalDateTime.now().minusMinutes(15);
+            List<User> users = userMapper.selectList(new LambdaQueryWrapper<User>().gt(User::getLastLoginTime, cutoff));
+            List<TeamPresenceMember> members = new ArrayList<>();
+            for (User u : users) {
+                if (u == null || u.getId() == null) continue;
+                members.add(new TeamPresenceMember(u.getId(), u.getUsername(), u.getLastLoginTime()));
+            }
+            String payloadJson = objectMapper.writeValueAsString(members);
+            RealtimeServerMessage msg = new RealtimeServerMessage(null, null, null, "TEAM_PRESENCE", payloadJson, LocalDateTime.now());
+            broadcastTeam(objectMapper.writeValueAsString(msg));
+        } catch (Exception ignored) {
         }
     }
 
@@ -285,5 +378,10 @@ public class RealtimeSessionHub {
                                  LocalDateTime lastSeenTime,
                                  boolean online,
                                  boolean editing) {
+    }
+
+    public record TeamPresenceMember(Long userId,
+                                     String username,
+                                     LocalDateTime lastSeenTime) {
     }
 }

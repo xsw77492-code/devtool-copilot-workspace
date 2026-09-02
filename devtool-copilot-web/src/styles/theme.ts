@@ -7,7 +7,7 @@ export function buildThemeOverrides(primaryColor: string): GlobalThemeOverrides 
       primaryColorHover: primaryColor,
       primaryColorPressed: primaryColor,
       primaryColorSuppl: primaryColor,
-      borderRadius: '12px',
+      borderRadius: '6px',
       fontFamily:
         'ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable", "Segoe UI", Inter, "PingFang SC", "Microsoft YaHei", sans-serif',
       fontFamilyMono:
@@ -18,18 +18,18 @@ export function buildThemeOverrides(primaryColor: string): GlobalThemeOverrides 
       siderColor: 'transparent'
     },
     Card: {
-      color: 'rgba(255, 255, 255, 0.74)',
-      borderRadius: '14px'
+      color: '#ffffff',
+      borderRadius: '8px'
     },
     Input: {
-      borderRadius: '12px'
+      borderRadius: '6px'
     },
     Button: {
-      borderRadiusMedium: '12px',
-      borderRadiusSmall: '10px'
+      borderRadiusMedium: '6px',
+      borderRadiusSmall: '5px'
     },
     Menu: {
-      itemBorderRadius: '10px'
+      itemBorderRadius: '6px'
     }
   }
 }

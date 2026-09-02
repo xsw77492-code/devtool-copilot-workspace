@@ -21,6 +21,7 @@ import com.devtoolcopilot.project.mapper.ProjectActivityMapper;
 import com.devtoolcopilot.project.mapper.ProjectInviteMapper;
 import com.devtoolcopilot.project.mapper.ProjectMemberMapper;
 import com.devtoolcopilot.project.mapper.ProjectMapper;
+import com.devtoolcopilot.project.service.ProjectCollabService;
 import com.devtoolcopilot.project.service.ProjectService;
 import com.devtoolcopilot.task.checklist.entity.TaskChecklistItem;
 import com.devtoolcopilot.task.checklist.mapper.TaskChecklistItemMapper;
@@ -50,6 +51,7 @@ import java.util.List;
 public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> implements ProjectService {
     private final TaskMapper taskMapper;
     private final ProjectMemberMapper projectMemberMapper;
+    private final ProjectCollabService projectCollabService;
     private final ProjectInviteMapper projectInviteMapper;
     private final ProjectActivityMapper projectActivityMapper;
     private final ProjectAuditLogMapper projectAuditLogMapper;
@@ -69,6 +71,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
 
     public ProjectServiceImpl(TaskMapper taskMapper,
                               ProjectMemberMapper projectMemberMapper,
+                              ProjectCollabService projectCollabService,
                               ProjectInviteMapper projectInviteMapper,
                               ProjectActivityMapper projectActivityMapper,
                               ProjectAuditLogMapper projectAuditLogMapper,
@@ -87,6 +90,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
                               ProjectAssetMapper projectAssetMapper) {
         this.taskMapper = taskMapper;
         this.projectMemberMapper = projectMemberMapper;
+        this.projectCollabService = projectCollabService;
         this.projectInviteMapper = projectInviteMapper;
         this.projectActivityMapper = projectActivityMapper;
         this.projectAuditLogMapper = projectAuditLogMapper;
@@ -144,10 +148,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     public boolean archiveProject(Long userId, Long projectId) {
         if (userId == null) throw new IllegalArgumentException("USER_ID_REQUIRED");
         if (projectId == null) throw new IllegalArgumentException("PROJECT_ID_REQUIRED");
-        Project project = this.getOne(Wrappers.<Project>lambdaQuery()
-                .eq(Project::getId, projectId)
-                .eq(Project::getUserId, userId));
+        Project project = this.getById(projectId);
         if (project == null) return false;
+        projectCollabService.requireAtLeast(userId, projectId, ProjectMemberRole.OWNER);
         this.update(null, Wrappers.<Project>lambdaUpdate()
                 .eq(Project::getId, projectId)
                 .set(Project::getArchived, 1)
@@ -163,10 +166,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     public boolean unarchiveProject(Long userId, Long projectId) {
         if (userId == null) throw new IllegalArgumentException("USER_ID_REQUIRED");
         if (projectId == null) throw new IllegalArgumentException("PROJECT_ID_REQUIRED");
-        Project project = this.getOne(Wrappers.<Project>lambdaQuery()
-                .eq(Project::getId, projectId)
-                .eq(Project::getUserId, userId));
+        Project project = this.getById(projectId);
         if (project == null) return false;
+        projectCollabService.requireAtLeast(userId, projectId, ProjectMemberRole.OWNER);
         this.update(null, Wrappers.<Project>lambdaUpdate()
                 .eq(Project::getId, projectId)
                 .set(Project::getArchived, 0)
@@ -186,12 +188,11 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         if (projectId == null) {
             throw new IllegalArgumentException("PROJECT_ID_REQUIRED");
         }
-        Project project = this.getOne(Wrappers.<Project>lambdaQuery()
-                .eq(Project::getId, projectId)
-                .eq(Project::getUserId, userId));
+        Project project = this.getById(projectId);
         if (project == null) {
             return false;
         }
+        projectCollabService.requireAtLeast(userId, projectId, ProjectMemberRole.OWNER);
 
         List<Long> taskIds = taskMapper.selectList(Wrappers.<Task>lambdaQuery()
                         .eq(Task::getProjectId, projectId)

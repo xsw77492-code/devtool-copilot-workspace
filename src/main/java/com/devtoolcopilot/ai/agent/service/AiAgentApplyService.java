@@ -4,6 +4,5 @@ import com.devtoolcopilot.ai.agent.dto.AiAgentApplyResponseDTO;
 import com.devtoolcopilot.ai.agent.dto.AiAgentPlanResponseDTO;
 
 public interface AiAgentApplyService {
-    AiAgentApplyResponseDTO apply(Long userId, Long projectId, AiAgentPlanResponseDTO plan);
+    AiAgentApplyResponseDTO apply(Long userId, Long projectId, AiAgentPlanResponseDTO plan, Long milestoneId, Long parentTaskId);
 }
-

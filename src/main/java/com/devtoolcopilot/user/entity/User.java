@@ -27,6 +27,12 @@ public class User {
     private Integer failedLoginAttempts;
     private LocalDateTime lockUntil;
 
+    private String avatarUrl;
+    private String nickname;
+    private String signature;
+    /** ONLINE / AWAY / BUSY / OFFLINE */
+    private String status;
+
     private LocalDateTime lastLoginTime;
     private String lastLoginIp;
     private String lastLoginUserAgent;

@@ -3,6 +3,8 @@ package com.devtoolcopilot.ai.service.impl;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.devtoolcopilot.ai.client.DeepSeekClient;
 import com.devtoolcopilot.ai.client.dto.ChatCompletionRequest;
+import com.devtoolcopilot.ai.config.DeepSeekProperties;
+import com.devtoolcopilot.ai.service.AiUsageService;
 import com.devtoolcopilot.ai.dto.AiChatMessageDTO;
 import com.devtoolcopilot.ai.prompt.AiChatContextPromptBuilder;
 import com.devtoolcopilot.ai.prompt.AiChatPromptBuilder;
@@ -27,6 +29,8 @@ public class AiChatServiceImpl implements AiChatService {
     private final ProjectMapper projectMapper;
     private final TaskService taskService;
     private final AiChatHistoryService historyService;
+    private final AiUsageService usageService;
+    private final DeepSeekProperties deepSeekProperties;
     private final ProjectCollabService projectCollabService;
 
     public AiChatServiceImpl(DeepSeekClient deepSeekClient,
@@ -35,6 +39,8 @@ public class AiChatServiceImpl implements AiChatService {
                              ProjectMapper projectMapper,
                              TaskService taskService,
                              AiChatHistoryService historyService,
+                             AiUsageService usageService,
+                             DeepSeekProperties deepSeekProperties,
                              ProjectCollabService projectCollabService) {
         this.deepSeekClient = deepSeekClient;
         this.promptBuilder = promptBuilder;
@@ -42,7 +48,30 @@ public class AiChatServiceImpl implements AiChatService {
         this.projectMapper = projectMapper;
         this.taskService = taskService;
         this.historyService = historyService;
+        this.usageService = usageService;
+        this.deepSeekProperties = deepSeekProperties;
         this.projectCollabService = projectCollabService;
+    }
+
+    /** 套餐配额检查：每月 token 上限 + 每日调用上限（0 = 不限） */
+    private void checkQuota(Long userId) {
+        if (userId == null) return;
+        Long monthlyQuota = deepSeekProperties.getMonthlyTokenQuota();
+        if (monthlyQuota != null && monthlyQuota > 0) {
+            long used = usageService.totalSince(userId, java.time.LocalDate.now().withDayOfMonth(1))
+                    .getOrDefault("totalTokens", 0L);
+            if (used >= monthlyQuota) {
+                throw new IllegalStateException("AI_MONTHLY_QUOTA_EXCEEDED");
+            }
+        }
+        Long dailyLimit = deepSeekProperties.getDailyCallLimit();
+        if (dailyLimit != null && dailyLimit > 0) {
+            long calls = usageService.totalSince(userId, java.time.LocalDate.now())
+                    .getOrDefault("calls", 0L);
+            if (calls >= dailyLimit) {
+                throw new IllegalStateException("AI_DAILY_CALL_LIMIT");
+            }
+        }
     }
 
     @Override
@@ -51,12 +80,18 @@ public class AiChatServiceImpl implements AiChatService {
     }
 
     public String chat(Long userId, Long projectId, List<AiChatMessageDTO> messages) {
+        return chat(userId, projectId, messages, "chat");
+    }
+
+    @Override
+    public String chat(Long userId, Long projectId, List<AiChatMessageDTO> messages, String type) {
         if (userId == null) {
             throw new IllegalArgumentException("USER_ID_REQUIRED");
         }
         if (messages == null || messages.isEmpty()) {
             throw new IllegalArgumentException("MESSAGES_REQUIRED");
         }
+        checkQuota(userId);
 
         Project project = null;
         List<Task> tasks = List.of();
@@ -93,9 +128,10 @@ public class AiChatServiceImpl implements AiChatService {
             reqMessages = reqMessages.subList(reqMessages.size() - max, reqMessages.size());
         }
 
-        String reply = deepSeekClient.chat(systemPrompt, reqMessages);
-        historyService.record(userId, projectId, lastUserPrompt(reqMessages), reply);
-        return reply;
+        DeepSeekClient.DeepSeekResult result = deepSeekClient.chatWithUsage(systemPrompt, reqMessages);
+        historyService.record(userId, projectId, lastUserPrompt(reqMessages), result.getContent(), type);
+        usageService.record(userId, projectId, type, result.getPromptTokens(), result.getCompletionTokens(), result.getTotalTokens());
+        return result.getContent();
     }
 
     @Override
@@ -103,9 +139,19 @@ public class AiChatServiceImpl implements AiChatService {
                              Long projectId,
                              List<AiChatMessageDTO> messages,
                              Consumer<String> onDelta) {
+        return chatStream(userId, projectId, messages, "chat", onDelta);
+    }
+
+    @Override
+    public String chatStream(Long userId,
+                             Long projectId,
+                             List<AiChatMessageDTO> messages,
+                             String type,
+                             Consumer<String> onDelta) {
         if (userId == null) {
             throw new IllegalArgumentException("USER_ID_REQUIRED");
         }
+        checkQuota(userId);
         if (messages == null || messages.isEmpty()) {
             throw new IllegalArgumentException("MESSAGES_REQUIRED");
         }
@@ -145,9 +191,10 @@ public class AiChatServiceImpl implements AiChatService {
             reqMessages = reqMessages.subList(reqMessages.size() - max, reqMessages.size());
         }
 
-        String reply = deepSeekClient.chatStream(systemPrompt, reqMessages, onDelta);
-        historyService.record(userId, projectId, lastUserPrompt(reqMessages), reply);
-        return reply;
+        DeepSeekClient.DeepSeekResult result = deepSeekClient.chatStreamWithUsage(systemPrompt, reqMessages, onDelta);
+        historyService.record(userId, projectId, lastUserPrompt(reqMessages), result.getContent(), type);
+        usageService.record(userId, projectId, type, result.getPromptTokens(), result.getCompletionTokens(), result.getTotalTokens());
+        return result.getContent();
     }
 
     private static String lastUserPrompt(List<ChatCompletionRequest.Message> reqMessages) {

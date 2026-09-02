@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NInput, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NButton, NDropdown, NInput, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
 import {
   projectCollabApi,
   type ProjectInviteItem,
@@ -38,7 +38,20 @@ type InviteStatusFilter = 'ALL' | InviteStatus
 
 const inviteQ = ref('')
 const inviteStatus = ref<InviteStatusFilter>('ALL')
+
+const headMoreOptions = computed(() => {
+  const opts: Array<{ key: string; label: string; disabled?: boolean }> = []
+  if (myRole.value) opts.push({ key: 'export', label: '导出成员', disabled: exporting.value })
+  if (myRole.value && !isOwner.value) opts.push({ key: 'leave', label: '退出项目' })
+  return opts
+})
+
+function onHeadMoreSelect(key: string | number) {
+  if (key === 'export') void exportMembers()
+  if (key === 'leave') void leaveProject()
+}
 const expandedInviteEmail = ref<string | null>(null)
+const emailInputRef = ref<InstanceType<typeof NInput> | null>(null)
 const inviteGroupOpen = ref<Record<InviteStatus, boolean>>({
   PENDING: true,
   ACCEPTED: true,
@@ -51,17 +64,17 @@ const isOwner = computed(() => membersResp.value?.myRole === 'OWNER')
 const myRole = computed(() => membersResp.value?.myRole || null)
 
 const roleOptions = [
-  { label: 'VIEWER（只读）', value: 'VIEWER' },
-  { label: 'DEVELOPER（可协作）', value: 'DEVELOPER' },
-  { label: 'OWNER（项目所有者）', value: 'OWNER' }
+  { label: '只读', value: 'VIEWER' },
+  { label: '可协作', value: 'DEVELOPER' },
+  { label: '项目所有者', value: 'OWNER' }
 ]
 
 const memberRoleOptions = [
-  { label: 'VIEWER（只读）', value: 'VIEWER' },
-  { label: 'DEVELOPER（可协作）', value: 'DEVELOPER' }
+  { label: '只读', value: 'VIEWER' },
+  { label: '可协作', value: 'DEVELOPER' }
 ]
 
-const roleFilterOptions = [{ label: '全部角色', value: 'ALL' }, ...memberRoleOptions, { label: 'OWNER', value: 'OWNER' }]
+const roleFilterOptions = [{ label: '全部角色', value: 'ALL' }, ...memberRoleOptions, { label: '项目所有者', value: 'OWNER' }]
 const statusFilterOptions = [
   { label: '全部状态', value: 'all' },
   { label: '启用中', value: 'active' },
@@ -70,12 +83,32 @@ const statusFilterOptions = [
 
 const inviteStatusOptions = [
   { label: '全部状态', value: 'ALL' },
-  { label: 'PENDING', value: 'PENDING' },
-  { label: 'ACCEPTED', value: 'ACCEPTED' },
-  { label: 'REJECTED', value: 'REJECTED' },
-  { label: 'EXPIRED', value: 'EXPIRED' },
-  { label: 'CANCELED', value: 'CANCELED' }
+  { label: '待办', value: 'PENDING' },
+  { label: '已接受', value: 'ACCEPTED' },
+  { label: '已拒绝', value: 'REJECTED' },
+  { label: '已过期', value: 'EXPIRED' },
+  { label: '已撤销', value: 'CANCELED' }
 ]
+
+function inviteStatusLabel(st: string) {
+  const map: Record<string, string> = {
+    PENDING: '待办',
+    ACCEPTED: '已接受',
+    REJECTED: '已拒绝',
+    EXPIRED: '已过期',
+    CANCELED: '已撤销'
+  }
+  return map[st] || st
+}
+
+function roleLabel(r?: string | null) {
+  const map: Record<string, string> = {
+    OWNER: '项目所有者',
+    DEVELOPER: '开发者',
+    VIEWER: '只读'
+  }
+  return map[r || ''] || r || ''
+}
 
 const inviteStatusOrder: InviteStatus[] = ['PENDING', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CANCELED']
 
@@ -177,6 +210,21 @@ function toggleInviteGroup(st: InviteStatus) {
   inviteGroupOpen.value = { ...inviteGroupOpen.value, [st]: !inviteGroupOpen.value[st] }
 }
 
+const allGroupsOpen = computed(() => inviteStatusOrder.every((st) => inviteGroupOpen.value[st]))
+
+function toggleAllGroups() {
+  const next = !allGroupsOpen.value
+  const o: Record<InviteStatus, boolean> = { PENDING: next, ACCEPTED: next, REJECTED: next, EXPIRED: next, CANCELED: next }
+  inviteGroupOpen.value = o
+}
+
+const pendingInviteCount = computed(() => inviteGroups.value.PENDING.length)
+
+function focusInvite() {
+  document.getElementById('invitePanel')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  setTimeout(() => emailInputRef.value?.focus(), 320)
+}
+
 async function load() {
   loading.value = true
   try {
@@ -269,6 +317,26 @@ function removeMember(userId: number, username: string) {
   })
 }
 
+function rowMenuOptions(m: ProjectMemberItem) {
+  const opts: Array<{ key: string; label: string }> = []
+  if (!isOwner.value || m.role === 'OWNER') return opts
+  if (Number(m.disabled || 0) === 0) {
+    opts.push({ key: 'disable', label: '禁用' })
+    opts.push({ key: 'transfer', label: '转让所有权' })
+  } else {
+    opts.push({ key: 'enable', label: '启用' })
+  }
+  opts.push({ key: 'remove', label: '移除成员' })
+  return opts
+}
+
+function onRowAction(m: ProjectMemberItem, key: string | number) {
+  if (key === 'disable') toggleDisabled(m, true)
+  else if (key === 'enable') toggleDisabled(m, false)
+  else if (key === 'transfer') transferOwner(m)
+  else if (key === 'remove') removeMember(m.userId, m.username)
+}
+
 function updateRole(m: ProjectMemberItem, nextRole: ProjectMemberRole) {
   if (!isOwner.value) return
   if (m.role === 'OWNER') return
@@ -276,7 +344,7 @@ function updateRole(m: ProjectMemberItem, nextRole: ProjectMemberRole) {
   if (m.role === nextRole) return
   dialog.warning({
     title: '调整角色',
-    content: `确定将 ${m.username} 的角色调整为 ${nextRole} 吗？`,
+    content: `确定将 ${m.username} 的角色调整为 ${roleLabel(nextRole)} 吗？`,
     positiveText: '确认',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -316,7 +384,7 @@ function transferOwner(m: ProjectMemberItem) {
   if (m.userId === 0 || m.role === 'OWNER') return
   dialog.warning({
     title: '转让所有权',
-    content: `确定将项目 OWNER 转让给 ${m.username} 吗？转让后你将不再是 OWNER。`,
+    content: `确定将项目所有者转让给 ${m.username} 吗？转让后你将不再是项目所有者。`,
     positiveText: '确认转让',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -421,28 +489,21 @@ watch(
 
 <template>
   <div class="page lightPage">
-    <div class="head">
-      <div class="left">
-        <h1 class="h1">成员管理</h1>
-        <div class="sub">
-          <span v-if="myRole" class="chip">我的角色：{{ myRole }}</span>
-        </div>
-      </div>
-      <div class="right">
-        <presence-bar :project-id="projectId" />
-        <n-button tertiary @click="router.push({ name: 'project-detail', params: { id: projectId } })">返回项目</n-button>
-        <n-button v-if="myRole" tertiary :loading="exporting" @click="exportMembers">导出成员</n-button>
-        <n-button v-if="myRole && !isOwner" tertiary @click="leaveProject">退出项目</n-button>
-        <n-button tertiary @click="load">刷新</n-button>
-      </div>
-    </div>
-
     <n-spin :show="loading">
       <div class="grid">
         <section class="panel lightPanel">
-          <div class="block-head">
-            <div class="h2">成员列表</div>
-            <div class="muted meta">{{ filteredMembers.length }}</div>
+          <div class="panelHead">
+            <div class="statLine">
+              共 {{ filteredMembers.length }} 人<span v-if="myRole"> · 我的角色：{{ roleLabel(myRole) }}</span>
+            </div>
+            <div class="headActions">
+              <presence-bar :project-id="projectId" />
+              <n-button secondary class="accentBtn" @click="router.push({ name: 'project-detail', params: { id: projectId } })">返回项目</n-button>
+              <n-button secondary class="accentBtn" @click="load">刷新</n-button>
+              <n-dropdown v-if="headMoreOptions.length" :options="headMoreOptions" trigger="click" placement="bottom-end" @select="onHeadMoreSelect">
+                <n-button tertiary>更多</n-button>
+              </n-dropdown>
+            </div>
           </div>
 
           <div class="filters">
@@ -460,11 +521,11 @@ watch(
               <div class="mMain">
                 <div class="mName">{{ m.username }}</div>
                 <div class="muted mEmail">{{ m.email }}</div>
-                <div v-if="Number(m.disabled || 0) === 1 && m.disabledTime" class="muted tiny">禁用时间：{{ fmtDate(m.disabledTime) }}</div>
-              </div>
-              <div class="mMeta">
-                <span class="tag" :class="`role-${m.role.toLowerCase()}`">{{ m.role }}</span>
-                <span v-if="Number(m.disabled || 0) === 1" class="tag tagDisabled">DISABLED</span>
+                <div class="mTags">
+                  <span class="tag" :class="`role-${m.role.toLowerCase()}`">{{ roleLabel(m.role) }}</span>
+                  <span v-if="Number(m.disabled || 0) === 1" class="tag tagDisabled">已禁用</span>
+                  <span v-if="Number(m.disabled || 0) === 1 && m.disabledTime" class="muted tiny">禁用时间：{{ fmtDate(m.disabledTime) }}</span>
+                </div>
               </div>
               <div class="mActions">
                 <n-select
@@ -476,67 +537,44 @@ watch(
                   :disabled="Number(m.disabled || 0) === 1"
                   @update:value="(v) => updateRole(m, v as any)"
                 />
-                <n-button
-                  v-if="isOwner && m.role !== 'OWNER' && Number(m.disabled || 0) === 0"
-                  size="small"
-                  secondary
-                  class="ghostBtn"
-                  @click="toggleDisabled(m, true)"
-                >
-                  禁用
-                </n-button>
-                <n-button
-                  v-if="isOwner && m.role !== 'OWNER' && Number(m.disabled || 0) === 1"
-                  size="small"
-                  secondary
-                  class="ghostBtn"
-                  @click="toggleDisabled(m, false)"
-                >
-                  启用
-                </n-button>
-                <n-button
-                  v-if="isOwner && m.role !== 'OWNER' && Number(m.disabled || 0) === 0"
-                  size="small"
-                  secondary
-                  class="ghostBtn"
-                  @click="transferOwner(m)"
-                >
-                  转让Owner
-                </n-button>
-                <n-button
+                <n-dropdown
                   v-if="isOwner && m.role !== 'OWNER'"
-                  size="small"
-                  secondary
-                  class="ghostBtn"
-                  @click="removeMember(m.userId, m.username)"
+                  :options="rowMenuOptions(m)"
+                  trigger="click"
+                  placement="bottom-end"
+                  @select="(k) => onRowAction(m, k)"
                 >
-                  移除成员
-                </n-button>
+                  <n-button size="small" secondary class="ghostBtn">更多</n-button>
+                </n-dropdown>
               </div>
             </div>
-            <div v-if="!filteredMembers.length" class="emptyState">
-              <div class="emptyTitle">暂无成员</div>
+            <div v-if="!membersResp?.members?.length" class="emptyState">
+              <div class="emptyTitle">邀请你的第一位协作者</div>
+              <div class="emptyDesc">把邀请链接发给同事，就可以一起在这个项目里协作。</div>
+              <n-button v-if="isOwner" size="small" secondary class="accentBtn" @click="focusInvite">去邀请</n-button>
+            </div>
+            <div v-else-if="!filteredMembers.length" class="emptyState">
+              <div class="emptyTitle">没有符合条件的成员</div>
+              <div class="emptyDesc">换个关键词或调整筛选条件试试</div>
             </div>
           </div>
         </section>
 
         <div v-if="isOwner" class="side">
-          <section class="panel lightPanel invitePanel">
-            <div class="block-head">
-              <div class="h2">邀请成员</div>
-            </div>
-
+          <section id="invitePanel" class="panel lightPanel invitePanel">
             <div class="inviteForm">
-              <n-input v-model:value="email" placeholder="输入成员邮箱" class="email" />
+              <n-input ref="emailInputRef" v-model:value="email" placeholder="输入成员邮箱" class="email" />
               <n-select v-model:value="role" :options="roleOptions" class="role" />
               <n-button :loading="inviting" class="ghostBtn" @click="invite">发送邀请</n-button>
             </div>
           </section>
 
           <section class="panel lightPanel">
-            <div class="block-head">
-              <div class="h2">邀请记录</div>
-              <div class="muted meta">{{ inviteAggs.length }}</div>
+            <div class="panelHead invHead">
+              <div class="statLine">
+                共 {{ inviteAggs.length }} 条邀请<span v-if="pendingInviteCount"> · 待办 {{ pendingInviteCount }} 条</span>
+              </div>
+              <div v-if="inviteAggs.length" class="linkBtn" @click="toggleAllGroups">{{ allGroupsOpen ? '全部折叠' : '全部展开' }}</div>
             </div>
 
             <div class="filters inviteFilters">
@@ -545,10 +583,10 @@ watch(
             </div>
 
             <div class="inviteGroups">
-              <div v-for="st in inviteStatusOrder" :key="st" class="group">
+              <div v-for="st in inviteStatusOrder" v-show="inviteGroups[st].length" :key="st" class="group">
                 <div class="groupHead" @click="toggleInviteGroup(st)">
                   <div class="ghLeft">
-                    <span class="statusChip" :class="`st-${st.toLowerCase()}`">{{ st }}</span>
+                    <span class="statusChip" :class="`st-${st.toLowerCase()}`">{{ inviteStatusLabel(st) }}</span>
                     <span class="muted tiny">{{ inviteGroups[st].length }} 个邮箱</span>
                   </div>
                   <div class="muted tiny">{{ inviteGroupOpen[st] ? '收起' : '展开' }}</div>
@@ -562,7 +600,7 @@ watch(
                         <div class="muted tiny">最近 {{ fmtDate(g.latest.createTime) }} · {{ g.count }} 次</div>
                       </div>
                       <div class="iMeta">
-                        <span class="statusChip" :class="`st-${g.latest.status.toLowerCase()}`">{{ g.latest.status }}</span>
+                        <span class="statusChip" :class="`st-${g.latest.status.toLowerCase()}`">{{ inviteStatusLabel(g.latest.status) }}</span>
                       </div>
                       <div class="iActions" @click.stop>
                         <n-button
@@ -585,15 +623,14 @@ watch(
                       <div v-for="it in g.items" :key="it.id" class="histRow">
                         <div class="histLeft">
                           <div class="tiny">{{ fmtDate(it.createTime) }}</div>
-                          <div class="muted tiny">role={{ it.role }} · expire={{ fmtDate(it.expireTime) || '-' }}</div>
+                          <div class="muted tiny">角色：{{ roleLabel(it.role) }} · 有效期至：{{ fmtDate(it.expireTime) || '-' }}</div>
                         </div>
                         <div class="histRight">
-                          <span class="statusChip" :class="`st-${it.status.toLowerCase()}`">{{ it.status }}</span>
+                          <span class="statusChip" :class="`st-${it.status.toLowerCase()}`">{{ inviteStatusLabel(it.status) }}</span>
                         </div>
                       </div>
                     </div>
                   </div>
-                  <div v-if="!inviteGroups[st].length" class="muted empty">暂无</div>
                 </div>
               </div>
             </div>
@@ -606,29 +643,39 @@ watch(
 
 <style scoped>
 .lightPage {
-  background: #ffffff;
+  background: transparent;
   color: #0f172a;
 }
 
-.sub {
+.panelHead {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 6px;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  height: 26px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: rgba(20, 184, 166, 0.08);
-  border: 1px solid rgba(20, 184, 166, 0.18);
-  color: rgba(15, 23, 42, 0.92);
-  font-weight: 760;
+.panelTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.statLine {
   font-size: 12px;
+  color: rgba(15, 23, 42, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .grid {
@@ -644,18 +691,17 @@ watch(
 }
 
 .lightPanel {
-  background:
-    radial-gradient(900px 420px at 10% 0%, rgba(6, 182, 212, 0.10), transparent 58%),
-    #ffffff;
-  border: none;
-  box-shadow: 0 18px 55px rgba(2, 6, 23, 0.06);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .memberList,
 .inviteList {
   display: grid;
-  gap: 8px;
+  gap: 0;
   margin-top: 12px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .filters {
@@ -680,18 +726,18 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: none;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.06);
-  transition: transform 140ms ease, box-shadow 140ms ease;
+  padding: 12px 6px;
+  border-radius: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: transparent;
+  box-shadow: none;
+  transition: background 140ms ease;
 }
 
 .memberRow:hover,
 .inviteRow:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 16px 46px rgba(2, 6, 23, 0.10);
+  background: rgba(15, 23, 42, 0.03);
 }
 
 .disabledRow {
@@ -714,8 +760,8 @@ watch(
   place-items: center;
   font-weight: 820;
   color: rgba(15, 23, 42, 0.86);
-  background: rgba(20, 184, 166, 0.10);
-  border: 1px solid rgba(20, 184, 166, 0.16);
+  background: rgba(var(--accent2-rgb), 0.08);
+  border: 1px solid rgba(var(--accent2-rgb), 0.14);
 }
 
 .pDot {
@@ -731,15 +777,15 @@ watch(
 }
 
 .p-on {
-  background: rgba(16, 185, 129, 0.95);
+  background: rgba(15, 118, 110, 0.80);
 }
 
 .p-away {
-  background: rgba(245, 158, 11, 0.90);
+  background: rgba(180, 123, 8, 0.80);
 }
 
 .p-edit {
-  background: rgba(20, 184, 166, 0.95);
+  background: rgba(30, 64, 175, 0.70);
 }
 
 .p-off {
@@ -755,7 +801,6 @@ watch(
   flex: 1;
 }
 
-.mMeta,
 .mActions,
 .iMeta,
 .iActions {
@@ -767,6 +812,14 @@ watch(
 .mName {
   font-weight: 860;
   letter-spacing: -0.1px;
+}
+
+.mTags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
 }
 
 .mEmail,
@@ -792,15 +845,15 @@ watch(
 }
 
 .role-owner {
-  background: rgba(20, 184, 166, 0.10);
-  border-color: rgba(20, 184, 166, 0.20);
-  color: rgba(15, 23, 42, 0.90);
+  background: rgba(30, 64, 175, 0.08);
+  border-color: rgba(30, 64, 175, 0.18);
+  color: rgba(30, 64, 175, 0.92);
 }
 
 .role-developer {
-  background: rgba(14, 165, 233, 0.10);
-  border-color: rgba(14, 165, 233, 0.18);
-  color: rgba(2, 132, 199, 0.92);
+  background: rgba(100, 116, 139, 0.10);
+  border-color: rgba(100, 116, 139, 0.18);
+  color: rgba(51, 65, 85, 0.92);
 }
 
 .role-viewer {
@@ -831,7 +884,6 @@ watch(
 :deep(.invitePanel .n-base-selection) {
   background: rgba(255, 255, 255, 0.78);
   border-color: transparent;
-  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.05);
   border-radius: 14px;
 }
 
@@ -843,7 +895,6 @@ watch(
 :deep(.invitePanel .n-input--focus),
 :deep(.invitePanel .n-base-selection--active) {
   border-color: transparent;
-  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.10), 0 12px 34px rgba(2, 6, 23, 0.06);
 }
 
 .tip {
@@ -855,15 +906,12 @@ watch(
   font-size: 12px;
 }
 
-.empty {
-  padding: 6px 0;
-}
-
 .emptyState {
-  padding: 18px 14px;
-  border-radius: 16px;
-  border: none;
+  padding: 34px 16px;
+  border-radius: 14px;
+  border: 1px dashed rgba(15, 23, 42, 0.14);
   background: rgba(15, 23, 42, 0.02);
+  text-align: center;
 }
 
 .emptyTitle {
@@ -873,6 +921,35 @@ watch(
 .emptyDesc {
   margin-top: 6px;
   line-height: 1.6;
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.emptyState .accentBtn {
+  margin-top: 14px;
+}
+
+.linkBtn {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.55);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.linkBtn:hover {
+  color: rgba(15, 23, 42, 0.85);
+}
+
+.accentBtn {
+  background: #fff !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+  color: #0f172a !important;
+}
+
+.accentBtn:hover {
+  background: rgba(15, 23, 42, 0.04) !important;
+  border-color: rgba(15, 23, 42, 0.28) !important;
+  color: #0f172a !important;
 }
 
 .status,
@@ -921,18 +998,17 @@ watch(
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  background: transparent;
   border: none;
-  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.05);
+  box-shadow: none;
   cursor: pointer;
   user-select: none;
-  transition: transform 140ms ease, box-shadow 140ms ease;
+  transition: background 140ms ease;
 }
 
 .groupHead:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 16px 46px rgba(2, 6, 23, 0.10);
+  background: rgba(15, 23, 42, 0.03);
 }
 
 .ghLeft {
@@ -953,7 +1029,7 @@ watch(
 }
 
 .emailRow.open {
-  box-shadow: 0 18px 52px rgba(2, 6, 23, 0.12);
+  background: rgba(15, 23, 42, 0.02);
 }
 
 .inviteHistory {
@@ -968,10 +1044,11 @@ watch(
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: 8px;
   border: none;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.05);
+  background: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
 }
 
 .histLeft {

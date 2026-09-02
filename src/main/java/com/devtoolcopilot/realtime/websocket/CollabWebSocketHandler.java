@@ -67,6 +67,27 @@ public class CollabWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        if ("SUBSCRIBE_TEAM".equalsIgnoreCase(op)) {
+            sessionHub.subscribeTeam(userId, session);
+            sessionHub.broadcastTeamPresence();
+            return;
+        }
+
+        if ("UNSUBSCRIBE_TEAM".equalsIgnoreCase(op)) {
+            sessionHub.unsubscribeTeam(session);
+            return;
+        }
+
+        if ("SUBSCRIBE_CHAT".equalsIgnoreCase(op)) {
+            sessionHub.subscribeChat(userId, session);
+            return;
+        }
+
+        if ("UNSUBSCRIBE_CHAT".equalsIgnoreCase(op)) {
+            sessionHub.unsubscribeChat(session);
+            return;
+        }
+
         if ("UNSUBSCRIBE".equalsIgnoreCase(op)) {
             Long old = (Long) session.getAttributes().get(ATTR_PROJECT_ID);
             if (old != null) {

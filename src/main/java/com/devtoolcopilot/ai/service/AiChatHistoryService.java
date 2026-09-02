@@ -7,7 +7,9 @@ import java.util.List;
 public interface AiChatHistoryService {
     void record(Long userId, Long projectId, String prompt, String response);
 
-    List<AiChatHistoryDTO> list(Long userId, Long projectId, Integer limit);
+    void record(Long userId, Long projectId, String prompt, String response, String type);
+
+    List<AiChatHistoryDTO> list(Long userId, Long projectId, String type, Integer limit);
 
     int deleteByIds(Long userId, List<Long> ids);
 

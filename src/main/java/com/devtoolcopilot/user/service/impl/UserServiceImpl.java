@@ -74,6 +74,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
+    public UserMeResponse me(Long userId) {
+        if (userId == null) {
+            throw new ApiException(401, "未登录");
+        }
+        User user = this.getById(userId);
+        if (user == null) {
+            throw new ApiException(401, "未登录");
+        }
+        return toMeResponse(user);
+    }
+
+    @Override
     public Long register(String username, String email, String rawPassword, String emailVerifyToken) {
         if (username == null || username.isBlank()) {
             throw new ApiException(400, "用户名不能为空");
@@ -519,6 +531,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 user.getEmail(),
                 user.getRole(),
                 user.getDisabled(),
+                user.getNickname(),
+                user.getAvatarUrl(),
+                user.getSignature(),
+                user.getStatus() == null ? "ONLINE" : user.getStatus(),
                 user.getLastLoginTime(),
                 user.getCreateTime()
         );

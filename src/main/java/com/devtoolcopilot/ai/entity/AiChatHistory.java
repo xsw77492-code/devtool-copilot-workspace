@@ -25,6 +25,9 @@ public class AiChatHistory {
 
     private String response;
 
+    @TableField("type")
+    private String type;
+
     @TableField(value = "create_time", fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 }

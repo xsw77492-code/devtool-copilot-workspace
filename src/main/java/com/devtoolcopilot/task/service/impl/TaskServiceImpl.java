@@ -21,6 +21,8 @@ import com.devtoolcopilot.task.comment.entity.TaskComment;
 import com.devtoolcopilot.task.comment.mapper.TaskCommentMapper;
 import com.devtoolcopilot.task.deliverable.entity.TaskDeliverable;
 import com.devtoolcopilot.task.deliverable.mapper.TaskDeliverableMapper;
+import com.devtoolcopilot.task.dto.TaskBatchStatusFailure;
+import com.devtoolcopilot.task.dto.TaskBatchStatusResult;
 import com.devtoolcopilot.task.entity.Task;
 import com.devtoolcopilot.task.entity.TaskStatus;
 import com.devtoolcopilot.task.follow.entity.TaskFollow;
@@ -132,6 +134,9 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         if (parentTaskId != null && parentTaskId != 0) {
             parent = this.getById(parentTaskId);
             if (parent == null || !Objects.equals(parent.getProjectId(), projectId)) {
+                throw new IllegalArgumentException("PARENT_TASK_INVALID");
+            }
+            if (parent.getParentTaskId() != null) {
                 throw new IllegalArgumentException("PARENT_TASK_INVALID");
             }
         }
@@ -448,6 +453,36 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     }
 
     @Override
+    public TaskBatchStatusResult batchUpdateStatusDetail(Long userId, List<Long> taskIds, TaskStatus status, Boolean forceDone) {
+        if (userId == null) throw new IllegalArgumentException("USER_ID_REQUIRED");
+        if (taskIds == null || taskIds.isEmpty()) throw new IllegalArgumentException("TASK_IDS_REQUIRED");
+        if (status == null) throw new IllegalArgumentException("STATUS_REQUIRED");
+        TaskBatchStatusResult res = TaskBatchStatusResult.empty();
+        int ok = 0;
+        for (Long id : taskIds) {
+            if (id == null) continue;
+            try {
+                if (updateStatus(userId, id, status, null, forceDone)) {
+                    ok++;
+                } else {
+                    res.getFailed().add(TaskBatchStatusFailure.of(id, 400, "更新失败"));
+                }
+            } catch (ApiException e) {
+                res.getFailed().add(TaskBatchStatusFailure.of(id, e.getCode(), e.getMessage()));
+            } catch (IllegalArgumentException e) {
+                String msg = e.getMessage();
+                if ("TASK_NOT_FOUND".equals(msg)) res.getFailed().add(TaskBatchStatusFailure.of(id, 404, "任务不存在"));
+                else if ("PROJECT_NOT_FOUND_OR_FORBIDDEN".equals(msg)) res.getFailed().add(TaskBatchStatusFailure.of(id, 403, "无权限或项目不存在"));
+                else res.getFailed().add(TaskBatchStatusFailure.of(id, 400, "更新失败"));
+            } catch (Exception e) {
+                res.getFailed().add(TaskBatchStatusFailure.of(id, 500, "更新失败"));
+            }
+        }
+        res.setOk(ok);
+        return res;
+    }
+
+    @Override
     public int batchUpdateFields(Long userId,
                                  List<Long> taskIds,
                                  String priority,
@@ -536,6 +571,20 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         projectCollabService.requireMember(userId, projectId);
         return this.list(Wrappers.<Task>lambdaQuery()
                 .eq(Task::getProjectId, projectId)
+                .orderByDesc(Task::getId));
+    }
+
+    @Override
+    public List<Task> listByProjectIds(Long userId, List<Long> projectIds) {
+        if (userId == null) {
+            throw new IllegalArgumentException("USER_ID_REQUIRED");
+        }
+        if (projectIds == null || projectIds.isEmpty()) {
+            return List.of();
+        }
+        return this.list(Wrappers.<Task>lambdaQuery()
+                .in(Task::getProjectId, projectIds)
+                .orderByAsc(Task::getProjectId)
                 .orderByDesc(Task::getId));
     }
 
@@ -679,6 +728,10 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
                     throw new IllegalArgumentException("PARENT_TASK_INVALID");
                 }
                 if (parent.getParentTaskId() != null) throw new IllegalArgumentException("PARENT_TASK_INVALID");
+                Long existingChildCount = this.count(Wrappers.<Task>lambdaQuery()
+                        .eq(Task::getProjectId, existing.getProjectId())
+                        .eq(Task::getParentTaskId, existing.getId()));
+                if (existingChildCount != null && existingChildCount > 0) throw new IllegalArgumentException("PARENT_TASK_INVALID");
                 existing.setParentTaskId(parentTaskId);
                 existing.setType("SUBTASK");
                 if (milestoneId == null || milestoneId == 0) {
@@ -751,6 +804,21 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
         if (task == null) return false;
         Long projectId = task.getProjectId();
         projectCollabService.requireAtLeast(userId, projectId, ProjectMemberRole.DEVELOPER);
+        ensureProjectWritable(projectId);
+
+        if (task.getParentTaskId() == null) {
+            List<Task> children = this.list(Wrappers.<Task>lambdaQuery()
+                    .eq(Task::getProjectId, projectId)
+                    .eq(Task::getParentTaskId, taskId));
+            if (children != null && !children.isEmpty()) {
+                for (Task c : children) {
+                    if (c == null) continue;
+                    c.setParentTaskId(null);
+                    if ("SUBTASK".equalsIgnoreCase(c.getType())) c.setType("TASK");
+                }
+                this.updateBatchById(children);
+            }
+        }
 
         if (attachmentMapper != null) {
             List<TaskAttachment> atts = attachmentMapper.selectList(Wrappers.<TaskAttachment>lambdaQuery().eq(TaskAttachment::getTaskId, taskId));

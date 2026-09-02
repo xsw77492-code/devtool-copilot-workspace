@@ -77,22 +77,7 @@ public class UserController {
     @GetMapping("/me")
     public R<UserMeResponse> me() {
         Long userId = UserContext.getUserId();
-        if (userId == null) {
-            return R.fail(401, "未登录");
-        }
-        User user = userService.getById(userId);
-        if (user == null) {
-            return R.fail(401, "未登录");
-        }
-        return R.ok(new UserMeResponse(
-                user.getId(),
-                user.getUsername(),
-                user.getEmail(),
-                user.getRole(),
-                user.getDisabled(),
-                user.getLastLoginTime(),
-                user.getCreateTime()
-        ));
+        return R.ok(userService.me(userId));
     }
 
     @PostMapping("/logout-all")

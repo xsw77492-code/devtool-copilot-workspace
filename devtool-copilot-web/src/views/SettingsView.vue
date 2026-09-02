@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NCard, NCheckbox, NInput, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
 import { useAuthStore } from '../stores/auth'
 import { authApi, type UserSessionItem } from '../api/auth'
 import NotificationSettingsPanel from '../components/NotificationSettingsPanel.vue'
@@ -161,7 +161,10 @@ onMounted(async () => {
     </div>
 
     <div class="grid">
-      <n-card class="panel lightPanel" title="外观与偏好">
+      <section class="secBlock">
+        <div class="secBlockHead">
+          <div class="secBlockTitle">外观与偏好</div>
+        </div>
         <n-spin :show="loading">
           <div class="form">
             <div class="row">
@@ -201,13 +204,19 @@ onMounted(async () => {
             </div>
           </div>
         </n-spin>
-      </n-card>
+      </section>
 
-      <n-card class="panel lightPanel" title="通知设置">
+      <section class="secBlock">
+        <div class="secBlockHead">
+          <div class="secBlockTitle">通知设置</div>
+        </div>
         <notification-settings-panel />
-      </n-card>
+      </section>
 
-      <n-card class="panel lightPanel" title="安全与会话">
+      <section class="secBlock">
+        <div class="secBlockHead">
+          <div class="secBlockTitle">安全与会话</div>
+        </div>
         <div class="sec">
           <div class="secTitle">修改密码</div>
           <div class="secGrid">
@@ -251,14 +260,14 @@ onMounted(async () => {
             </div>
           </n-spin>
         </div>
-      </n-card>
+      </section>
     </div>
   </div>
 </template>
 
 <style scoped>
 .lightPage {
-  background: #ffffff;
+  background: transparent;
   color: #0f172a;
 }
 
@@ -282,12 +291,34 @@ onMounted(async () => {
 .grid {
   margin-top: 14px;
   display: grid;
-  gap: 14px;
+  gap: 18px;
+}
+
+.secBlock {
+  padding: 0 0 18px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.secBlock:last-child {
+  border-bottom: 0;
+}
+
+.secBlockHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 0 10px;
+}
+
+.secBlockTitle {
+  font-weight: 950;
+  letter-spacing: -0.3px;
 }
 
 .form {
   display: grid;
-  gap: 14px;
+  gap: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .row {
@@ -295,6 +326,8 @@ onMounted(async () => {
   grid-template-columns: 1fr 280px;
   gap: 14px;
   align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .k {
@@ -316,8 +349,8 @@ onMounted(async () => {
 }
 
 .accentBtn {
-  background: rgba(20, 184, 166, 0.12) !important;
-  border-color: rgba(20, 184, 166, 0.22) !important;
+  background: rgba(var(--accent-rgb), 0.06) !important;
+  border-color: rgba(var(--accent-rgb), 0.12) !important;
   color: rgba(15, 23, 42, 0.92) !important;
 }
 
@@ -347,6 +380,7 @@ onMounted(async () => {
 .secActions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .sep {
@@ -355,7 +389,8 @@ onMounted(async () => {
 
 .sessList {
   display: grid;
-  gap: 10px;
+  gap: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .sess {
@@ -363,9 +398,10 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.02);
+  padding: 10px 0;
+  border-radius: 0;
+  background: transparent;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .sessTop {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NInput, NModal, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NButton, NDropdown, NInput, NModal, NSpin, useDialog, useMessage } from 'naive-ui'
 import { adminApi, type AdminLoginAuditItem, type AdminUserItem } from '../api/admin'
 
 const message = useMessage()
@@ -25,6 +25,11 @@ const filtered = computed(() => {
   if (!k) return list.value
   return list.value.filter((u) => u.username.toLowerCase().includes(k) || u.email.toLowerCase().includes(k))
 })
+
+const rowMoreOptions = computed(() => [
+  { key: 'audits', label: '最近登录' },
+  { key: 'reset', label: '重置密码' }
+])
 
 function fmtTime(v?: string | null) {
   if (!v) return '-'
@@ -74,6 +79,16 @@ async function toggleDisabled(u: AdminUserItem) {
       }
     }
   })
+}
+
+function onRowMoreSelect(key: string, u: AdminUserItem) {
+  if (key === 'audits') {
+    openAudits(u)
+    return
+  }
+  if (key === 'reset') {
+    openReset(u)
+  }
 }
 
 function openReset(u: AdminUserItem) {
@@ -143,22 +158,23 @@ onMounted(load)
       </div>
     </div>
 
-    <section class="panel block">
-      <div class="block-head">
+    <div class="section">
+      <div class="sectionHead">
         <div class="h2">Users</div>
         <div class="muted meta">{{ filtered.length }}</div>
       </div>
 
       <n-spin :show="loading">
-        <div class="table">
-          <div class="row headRow">
+        <div class="uTable">
+          <div class="uRow uHead">
             <div class="c user">用户</div>
             <div class="c role">角色</div>
             <div class="c status">状态</div>
             <div class="c last">最近登录</div>
             <div class="c action">操作</div>
           </div>
-          <div v-for="u in filtered" :key="u.id" class="row bodyRow">
+
+          <div v-for="u in filtered" :key="u.id" class="uRow uBody">
             <div class="c user">
               <div class="uName">{{ u.username }}</div>
               <div class="uEmail muted">{{ u.email }}</div>
@@ -176,16 +192,17 @@ onMounted(load)
               <div class="muted tiny">{{ u.lastLoginIp || '-' }}</div>
             </div>
             <div class="c action">
-              <n-button size="small" tertiary @click="openAudits(u)">最近登录</n-button>
-              <n-button size="small" tertiary @click="openReset(u)">重置密码</n-button>
               <n-button size="small" :type="u.disabled === 1 ? 'primary' : 'error'" secondary @click="toggleDisabled(u)">
                 {{ u.disabled === 1 ? '启用' : '禁用' }}
               </n-button>
+              <n-dropdown :options="rowMoreOptions" @select="(k) => onRowMoreSelect(String(k), u)">
+                <n-button size="small" tertiary>更多</n-button>
+              </n-dropdown>
             </div>
           </div>
         </div>
       </n-spin>
-    </section>
+    </div>
 
     <n-modal v-model:show="showReset" preset="card" title="重置密码" class="modal">
       <div class="modalBody">
@@ -234,33 +251,47 @@ onMounted(load)
   width: 260px;
 }
 
-.table {
+.section {
   display: grid;
   gap: 10px;
-  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
 }
 
-.row {
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.uTable {
+  display: grid;
+  gap: 6px;
+}
+
+.uRow {
   display: grid;
   grid-template-columns: 1.3fr 0.6fr 0.9fr 0.9fr 1.2fr;
   gap: 12px;
   align-items: center;
 }
 
-.headRow {
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.03);
+.uHead {
+  padding: 8px 8px;
   color: rgba(15, 23, 42, 0.62);
   font-size: 12px;
   font-weight: 700;
 }
 
-.bodyRow {
-  padding: 12px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  background: rgba(255, 255, 255, 0.7);
+.uBody {
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 10px;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.uBody:hover {
+  background: rgba(15, 23, 42, 0.03);
 }
 
 .uName {
@@ -304,8 +335,8 @@ onMounted(load)
 }
 
 .pill.neutral {
-  background: rgba(6, 182, 212, 0.10);
-  border-color: rgba(6, 182, 212, 0.20);
+  background: rgba(var(--accent-rgb), 0.06);
+  border-color: rgba(var(--accent-rgb), 0.14);
   color: rgba(15, 23, 42, 0.90);
 }
 
@@ -377,13 +408,13 @@ onMounted(load)
 }
 
 @media (max-width: 980px) {
-  .row {
+  .uRow {
     grid-template-columns: 1fr;
   }
-  .headRow {
+  .uHead {
     display: none;
   }
-  .bodyRow {
+  .uBody {
     gap: 10px;
   }
   .search {

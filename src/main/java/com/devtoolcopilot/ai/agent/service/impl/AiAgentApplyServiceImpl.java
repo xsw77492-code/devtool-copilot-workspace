@@ -41,7 +41,7 @@ public class AiAgentApplyServiceImpl implements AiAgentApplyService {
 
     @Override
     @Transactional
-    public AiAgentApplyResponseDTO apply(Long userId, Long projectId, AiAgentPlanResponseDTO plan) {
+    public AiAgentApplyResponseDTO apply(Long userId, Long projectId, AiAgentPlanResponseDTO plan, Long milestoneId, Long parentTaskId) {
         //region debug-point ai-apply-not-visible/server-report
         try {
             String url = System.getenv("DEBUG_SERVER_URL");
@@ -87,8 +87,8 @@ public class AiAgentApplyServiceImpl implements AiAgentApplyService {
                     null,
                     userId,
                     null,
-                    null,
-                    null,
+                    milestoneId,
+                    parentTaskId,
                     null,
                     "AI"
             );

@@ -349,14 +349,12 @@ async function onActionSelect(key: string | number) {
 
 <template>
   <div class="page lightPage">
-    <div class="head">
-      <div class="left">
-        <h1 class="h1">通知中心</h1>
-      </div>
-      <div class="right">
-        <n-button tertiary @click="load">刷新</n-button>
+    <div class="panelHead">
+      <div class="statLine">共 {{ list.length }} 条 · 未读 {{ ns.unreadCount }} 条</div>
+      <div class="headActions">
+        <n-button secondary class="accentBtn" @click="load">刷新</n-button>
         <n-dropdown :options="actionOptions" trigger="click" @select="onActionSelect">
-          <n-button secondary class="accentBtn">操作</n-button>
+          <n-button tertiary>操作</n-button>
         </n-dropdown>
       </div>
     </div>
@@ -467,8 +465,32 @@ async function onActionSelect(key: string | number) {
 
 <style scoped>
 .lightPage {
-  background: #ffffff;
+  background: transparent;
   color: #0f172a;
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.statLine {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sub {
@@ -478,12 +500,14 @@ async function onActionSelect(key: string | number) {
 
 .toolbar {
   margin-top: 14px;
-  display: inline-flex;
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   padding: 6px;
-  border-radius: 16px;
-  background: rgba(15, 23, 42, 0.02);
-  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.06);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.06);
 }
 
 .filters {
@@ -503,35 +527,37 @@ async function onActionSelect(key: string | number) {
 }
 
 .seg {
-  height: 38px;
-  padding: 0 14px;
-  border-radius: 12px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
-  font-weight: 850;
-  color: rgba(15, 23, 42, 0.70);
+  font-size: 12.5px;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.78);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .seg.active {
-  background: #ffffff;
-  border-color: rgba(20, 184, 166, 0.18);
-  box-shadow: 0 14px 40px rgba(2, 6, 23, 0.08);
+  background: rgba(var(--accent-rgb), 0.05);
+  border-color: rgba(var(--accent-rgb), 0.12);
   color: rgba(15, 23, 42, 0.90);
 }
 
 .divider {
   width: 1px;
-  margin: 0 6px;
+  height: 18px;
+  align-self: center;
   background: rgba(15, 23, 42, 0.10);
+  margin: 0 4px;
 }
 
 .accentBtn {
-  background: rgba(20, 184, 166, 0.12) !important;
-  border-color: rgba(20, 184, 166, 0.22) !important;
+  background: rgba(var(--accent-rgb), 0.06) !important;
+  border-color: rgba(var(--accent-rgb), 0.12) !important;
   color: rgba(15, 23, 42, 0.92) !important;
   transition: transform 160ms ease, filter 160ms ease;
 }
@@ -547,16 +573,15 @@ async function onActionSelect(key: string | number) {
 
 .lightPanel {
   margin-top: 14px;
-  background:
-    radial-gradient(1000px 460px at 10% 0%, rgba(6, 182, 212, 0.10), transparent 58%),
-    #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: 0 16px 45px rgba(2, 6, 23, 0.06);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .list {
   display: grid;
-  gap: 10px;
+  gap: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .item {
@@ -564,11 +589,12 @@ async function onActionSelect(key: string | number) {
   grid-template-columns: 10px 1fr auto;
   gap: 14px;
   align-items: start;
-  padding: 16px 16px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.06);
-  transition: transform 160ms ease, box-shadow 160ms ease;
+  padding: 14px 6px;
+  border-radius: 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: transparent;
+  box-shadow: none;
+  transition: background 160ms ease;
 }
 
 .item.selecting {
@@ -576,8 +602,7 @@ async function onActionSelect(key: string | number) {
 }
 
 .item:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 44px rgba(2, 6, 23, 0.10);
+  background: rgba(15, 23, 42, 0.03);
 }
 
 .sel {
@@ -593,8 +618,8 @@ async function onActionSelect(key: string | number) {
 }
 
 .item.unread .badge {
-  background: rgba(20, 184, 166, 0.86);
-  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.12);
+  background: rgba(var(--accent-rgb), 0.86);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.10);
 }
 
 .top {
@@ -674,13 +699,13 @@ async function onActionSelect(key: string | number) {
 }
 
 .action:hover {
-  border-color: rgba(20, 184, 166, 0.24);
+  border-color: rgba(var(--accent-rgb), 0.14);
   color: rgba(15, 23, 42, 0.90);
 }
 
 .action.primary {
-  background: rgba(20, 184, 166, 0.10);
-  border-color: rgba(20, 184, 166, 0.22);
+  background: rgba(var(--accent-rgb), 0.05);
+  border-color: rgba(var(--accent-rgb), 0.14);
   color: rgba(15, 23, 42, 0.90);
 }
 
@@ -698,8 +723,8 @@ async function onActionSelect(key: string | number) {
 }
 
 .unreadPill {
-  background: rgba(20, 184, 166, 0.10);
-  border-color: rgba(20, 184, 166, 0.18);
+  background: rgba(var(--accent-rgb), 0.05);
+  border-color: rgba(var(--accent-rgb), 0.12);
   color: rgba(15, 23, 42, 0.90);
 }
 

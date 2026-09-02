@@ -11,11 +11,11 @@ public interface ProjectMapper extends BaseMapper<Project> {
     @Select("""
             SELECT p.*
             FROM project p
-            WHERE p.user_id = #{userId}
+            WHERE (p.user_id = #{userId}
                OR EXISTS (
                   SELECT 1 FROM project_member pm
                   WHERE pm.project_id = p.id AND pm.user_id = #{userId}
-               )
+               ))
               AND (#{includeArchived} = 1 OR p.archived = 0)
             ORDER BY p.id DESC
             """)

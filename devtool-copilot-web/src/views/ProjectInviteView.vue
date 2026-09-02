@@ -46,7 +46,7 @@ async function reject() {
   try {
     await projectCollabApi.rejectInvite(token.value)
     message.success('已拒绝邀请')
-    router.replace({ name: 'dashboard' })
+    router.replace({ name: 'board' })
   } catch (e: any) {
     message.error(e?.message || '操作失败')
   } finally {

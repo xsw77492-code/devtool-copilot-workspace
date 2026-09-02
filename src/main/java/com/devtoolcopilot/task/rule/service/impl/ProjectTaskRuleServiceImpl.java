@@ -1,7 +1,9 @@
 package com.devtoolcopilot.task.rule.service.impl;
 
 import com.devtoolcopilot.common.exception.ApiException;
+import com.devtoolcopilot.project.entity.Project;
 import com.devtoolcopilot.project.entity.ProjectMemberRole;
+import com.devtoolcopilot.project.mapper.ProjectMapper;
 import com.devtoolcopilot.project.service.ProjectCollabService;
 import com.devtoolcopilot.task.rule.dto.ProjectTaskRuleDTO;
 import com.devtoolcopilot.task.rule.entity.ProjectTaskRule;
@@ -13,10 +15,12 @@ import org.springframework.stereotype.Service;
 public class ProjectTaskRuleServiceImpl implements ProjectTaskRuleService {
     private final ProjectCollabService projectCollabService;
     private final ProjectTaskRuleMapper ruleMapper;
+    private final ProjectMapper projectMapper;
 
-    public ProjectTaskRuleServiceImpl(ProjectCollabService projectCollabService, ProjectTaskRuleMapper ruleMapper) {
+    public ProjectTaskRuleServiceImpl(ProjectCollabService projectCollabService, ProjectTaskRuleMapper ruleMapper, ProjectMapper projectMapper) {
         this.projectCollabService = projectCollabService;
         this.ruleMapper = ruleMapper;
+        this.projectMapper = projectMapper;
     }
 
     @Override
@@ -35,6 +39,7 @@ public class ProjectTaskRuleServiceImpl implements ProjectTaskRuleService {
         if (userId == null) throw new ApiException(401, "未登录");
         if (projectId == null) throw new ApiException(400, "projectId不能为空");
         projectCollabService.requireAtLeast(userId, projectId, ProjectMemberRole.OWNER);
+        ensureProjectWritable(projectId);
 
         int flag = Boolean.TRUE.equals(requireChecklistDoneForDone) ? 1 : 0;
         ProjectTaskRule row = ruleMapper.selectById(projectId);
@@ -50,5 +55,14 @@ public class ProjectTaskRuleServiceImpl implements ProjectTaskRuleService {
         ProjectTaskRuleDTO dto = new ProjectTaskRuleDTO();
         dto.setRequireChecklistDoneForDone(flag == 1);
         return dto;
+    }
+
+    private void ensureProjectWritable(Long projectId) {
+        if (projectId == null) return;
+        if (projectMapper == null) return;
+        Project p = projectMapper.selectById(projectId);
+        if (p != null && p.getArchived() != null && p.getArchived() == 1) {
+            throw new ApiException(400, "项目已归档");
+        }
     }
 }

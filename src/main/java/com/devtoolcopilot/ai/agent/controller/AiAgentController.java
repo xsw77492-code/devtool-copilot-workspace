@@ -108,7 +108,9 @@ public class AiAgentController {
         try {
             Long projectId = req == null ? null : req.getProjectId();
             AiAgentPlanResponseDTO plan = req == null ? null : req.getPlan();
-            AiAgentApplyResponseDTO dto = aiAgentApplyService.apply(userId, projectId, plan);
+            Long milestoneId = req == null ? null : req.getMilestoneId();
+            Long parentTaskId = req == null ? null : req.getParentTaskId();
+            AiAgentApplyResponseDTO dto = aiAgentApplyService.apply(userId, projectId, plan, milestoneId, parentTaskId);
             return R.ok(dto);
         } catch (IllegalArgumentException e) {
             String msg = e.getMessage();

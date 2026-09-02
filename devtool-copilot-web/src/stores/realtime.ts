@@ -21,6 +21,12 @@ export interface PresenceMember {
   editing?: boolean | null
 }
 
+export interface TeamPresenceMember {
+  userId: number
+  username?: string | null
+  lastSeenTime?: string | null
+}
+
 export const useRealtimeStore = defineStore('realtime', () => {
   const auth = useAuthStore()
 
@@ -65,6 +71,18 @@ export const useRealtimeStore = defineStore('realtime', () => {
 
   const presenceSeq = ref(0)
   const presenceMembers = ref<PresenceMember[]>([])
+  const teamPresence = ref<TeamPresenceMember[]>([])
+
+  /** 聊天订阅状态：true 表示当前会话已订阅聊天频道 */
+  const chatSubscribed = ref(false)
+  /** 收到的实时聊天事件（CHAT_MESSAGE / CHAT_MESSAGE_RECALLED，跨标签页同步） */
+  const chatEvents = ref<Array<{ type?: string; conversationId: number; message?: any; messageId?: number | null }>>([])
+
+  function pushChatEvent(ev: { type?: string; conversationId: number; message?: any; messageId?: number | null }) {
+    if (!ev || !ev.conversationId) return
+    if (!ev.message && !ev.messageId) return
+    chatEvents.value = [...chatEvents.value.slice(-199), ev]
+  }
 
   const tabId = Math.random().toString(16).slice(2) + Date.now().toString(16)
   const bc =
@@ -97,6 +115,13 @@ export const useRealtimeStore = defineStore('realtime', () => {
         const msg = ev?.data?.msg as RealtimeServerMessage
         if (!msg) return
         acceptExternalEvent(msg)
+        if (String(msg.type || '') === 'CHAT_MESSAGE' || String(msg.type || '') === 'CHAT_MESSAGE_RECALLED') {
+          try {
+            const payload = JSON.parse(String(msg.payloadJson || '{}'))
+            pushChatEvent({ type: msg.type, ...payload })
+          } catch {
+          }
+        }
       }
     } catch {
     }
@@ -111,6 +136,13 @@ export const useRealtimeStore = defineStore('realtime', () => {
           const msg = obj?.msg as RealtimeServerMessage
           if (!msg) return
           acceptExternalEvent(msg)
+          if (String(msg.type || '') === 'CHAT_MESSAGE' || String(msg.type || '') === 'CHAT_MESSAGE_RECALLED') {
+            try {
+              const payload = JSON.parse(String(msg.payloadJson || '{}'))
+              pushChatEvent({ type: msg.type, ...payload })
+            } catch {
+            }
+          }
         } catch {
         }
       })
@@ -121,6 +153,12 @@ export const useRealtimeStore = defineStore('realtime', () => {
   let ws: WebSocket | null = null
   let reconnectTimer: any = null
   let heartbeatTimer: any = null
+
+  // 指数退避：避免后端 devtools 热重启时前端 1.2s 疯狂重连。
+  // 重启窗口期通常 5~15s，封顶 30s 足以覆盖一次完整的重启周期。
+  let reconnectDelay = 1200
+  const RECONNECT_BASE = 1200
+  const RECONNECT_MAX = 30000
 
   const isReady = computed(() => connected.value && !!ws && ws.readyState === WebSocket.OPEN)
 
@@ -141,9 +179,12 @@ export const useRealtimeStore = defineStore('realtime', () => {
   function scheduleReconnect() {
     clearReconnect()
     if (!auth.isAuthed) return
+    const delay = reconnectDelay
+    // 1.2s -> ~2s -> ~3.4s -> ~5.8s -> ~9.8s -> ~16.6s -> 30s (封顶)
+    reconnectDelay = Math.min(RECONNECT_MAX, Math.max(RECONNECT_BASE, Math.floor(reconnectDelay * 1.7)))
     reconnectTimer = setTimeout(() => {
       connect()
-    }, 1200)
+    }, delay)
   }
 
   function disconnect() {
@@ -208,6 +249,27 @@ export const useRealtimeStore = defineStore('realtime', () => {
     send({ op: 'EDIT', projectId: activeProjectId.value, editing })
   }
 
+  function subscribeTeam() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    send({ op: 'SUBSCRIBE_TEAM' })
+  }
+
+  function unsubscribeTeam() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    send({ op: 'UNSUBSCRIBE_TEAM' })
+  }
+
+  /** 订阅聊天频道：接收自己参与会话的实时消息 */
+  function subscribeChat() {
+    chatSubscribed.value = true
+    send({ op: 'SUBSCRIBE_CHAT' })
+  }
+
+  function unsubscribeChat() {
+    chatSubscribed.value = false
+    send({ op: 'UNSUBSCRIBE_CHAT' })
+  }
+
   function connect() {
     if (!auth.isAuthed) return
     if (connecting.value || connected.value) return
@@ -232,10 +294,16 @@ export const useRealtimeStore = defineStore('realtime', () => {
     ws.onopen = () => {
       connecting.value = false
       connected.value = true
+      // 连接成功，重置退避
+      reconnectDelay = RECONNECT_BASE
       // #region debug-point B:ws-open
       __dtcDbg('B', 'stores/realtime.ts:onopen', '[DEBUG] ws open', { hasProject: !!activeProjectId.value })
       // #endregion
       if (activeProjectId.value) subscribe(activeProjectId.value, activeViewType.value || undefined, activeViewId.value)
+      if (chatSubscribed.value) subscribeChat()
+      if (teamPresence.length) {
+        /* team 订阅由各页面按需发起 */
+      }
     }
 
     ws.onclose = () => {
@@ -286,6 +354,26 @@ export const useRealtimeStore = defineStore('realtime', () => {
         return
       }
 
+      if (t === 'TEAM_PRESENCE') {
+        try {
+          const list = JSON.parse(String(msg?.payloadJson || '[]'))
+          teamPresence.value = Array.isArray(list) ? (list as TeamPresenceMember[]) : []
+        } catch {
+          teamPresence.value = []
+        }
+        return
+      }
+
+      if (t === 'CHAT_MESSAGE' || t === 'CHAT_MESSAGE_RECALLED') {
+        try {
+          const payload = JSON.parse(String(msg?.payloadJson || '{}'))
+          pushChatEvent({ type: t, ...payload })
+        } catch {
+        }
+        publishEvent(msg as RealtimeServerMessage)
+        return
+      }
+
       lastEvent.value = msg as RealtimeServerMessage
       seq.value += 1
       publishEvent(msg as RealtimeServerMessage)
@@ -322,10 +410,17 @@ export const useRealtimeStore = defineStore('realtime', () => {
     lastToast,
     presenceSeq,
     presenceMembers,
+    teamPresence,
     publishEvent,
     connect,
     disconnect,
     subscribe,
+    subscribeTeam,
+    unsubscribeTeam,
+    subscribeChat,
+    unsubscribeChat,
+    chatSubscribed,
+    chatEvents,
     setView,
     setEditing
   }

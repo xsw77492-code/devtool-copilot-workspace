@@ -28,7 +28,8 @@ public class ChatAiController {
         }
         try {
             Long projectId = req == null ? null : req.getProjectId();
-            String reply = aiChatService.chat(userId, projectId, req == null ? null : req.getMessages());
+            String type = req == null ? null : req.getType();
+            String reply = aiChatService.chat(userId, projectId, req == null ? null : req.getMessages(), type);
             return R.ok(new AiChatResponseDTO(reply));
         } catch (IllegalArgumentException e) {
             if ("MESSAGES_REQUIRED".equals(e.getMessage())) {
@@ -48,6 +49,12 @@ public class ChatAiController {
             }
             if ("DEEPSEEK_REQUEST_FAILED".equals(msg)) {
                 return R.fail(502, "DeepSeek网络错误或超时");
+            }
+            if ("AI_MONTHLY_QUOTA_EXCEEDED".equals(msg)) {
+                return R.fail(429, "本月 AI 额度已用完，请升级套餐或等待下月重置");
+            }
+            if ("AI_DAILY_CALL_LIMIT".equals(msg)) {
+                return R.fail(429, "今日 AI 调用次数已达上限");
             }
             return R.fail(502, "AI服务调用失败");
         }
@@ -72,7 +79,8 @@ public class ChatAiController {
         CompletableFuture.runAsync(() -> {
             try {
                 Long projectId = req == null ? null : req.getProjectId();
-                aiChatService.chatStream(userId, projectId, req == null ? null : req.getMessages(), (delta) -> {
+                String type = req == null ? null : req.getType();
+                aiChatService.chatStream(userId, projectId, req == null ? null : req.getMessages(), type, (delta) -> {
                     try {
                         emitter.send(SseEmitter.event().name("delta").data(delta));
                     } catch (Exception e) {
@@ -98,6 +106,8 @@ public class ChatAiController {
                 if ("DEEPSEEK_UNAUTHORIZED".equals(msg)) m = "DeepSeek API Key无效或无权限";
                 else if ("DEEPSEEK_RATE_LIMIT".equals(msg)) m = "DeepSeek触发限流或余额不足";
                 else if ("DEEPSEEK_REQUEST_FAILED".equals(msg)) m = "DeepSeek网络错误或超时";
+                else if ("AI_MONTHLY_QUOTA_EXCEEDED".equals(msg)) m = "本月 AI 额度已用完，请升级套餐或等待下月重置";
+                else if ("AI_DAILY_CALL_LIMIT".equals(msg)) m = "今日 AI 调用次数已达上限";
                 try {
                     emitter.send(SseEmitter.event().name("error").data(m));
                 } catch (Exception ignored) {

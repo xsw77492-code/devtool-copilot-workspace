@@ -9,6 +9,7 @@ import com.devtoolcopilot.audit.service.ProjectAuditService;
 import com.devtoolcopilot.project.mapper.ProjectActivityMapper;
 import com.devtoolcopilot.project.mapper.ProjectInviteMapper;
 import com.devtoolcopilot.project.mapper.ProjectMemberMapper;
+import com.devtoolcopilot.project.service.ProjectCollabService;
 import com.devtoolcopilot.project.service.ProjectService;
 import com.devtoolcopilot.project.service.impl.ProjectServiceImpl;
 import com.devtoolcopilot.task.checklist.mapper.TaskChecklistItemMapper;
@@ -28,6 +29,7 @@ public class ProjectServiceConfig {
     @Bean
     public ProjectService projectService(TaskMapper taskMapper,
                                          ProjectMemberMapper projectMemberMapper,
+                                         ProjectCollabService projectCollabService,
                                          ProjectInviteMapper projectInviteMapper,
                                          ProjectActivityMapper projectActivityMapper,
                                          ProjectAuditLogMapper projectAuditLogMapper,
@@ -47,6 +49,7 @@ public class ProjectServiceConfig {
         return new ProjectServiceImpl(
                 taskMapper,
                 projectMemberMapper,
+                projectCollabService,
                 projectInviteMapper,
                 projectActivityMapper,
                 projectAuditLogMapper,

@@ -8,5 +8,6 @@ public class AiChatHistoryDTO {
     private Long projectId;
     private String prompt;
     private String response;
+    private String type;
     private String createTime;
 }

@@ -51,7 +51,7 @@ async function submit() {
       emailVerifyToken
     })
     await auth.login({ username: username.value, password: password.value })
-    const redirect = (route.query.redirect as string | undefined) || '/dashboard'
+    const redirect = (route.query.redirect as string | undefined) || '/board'
     router.replace(redirect)
   } catch (e: any) {
     message.error(e?.message || '注册失败')

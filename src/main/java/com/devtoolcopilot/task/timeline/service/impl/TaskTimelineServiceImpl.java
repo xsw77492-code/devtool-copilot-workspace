@@ -39,4 +39,22 @@ public class TaskTimelineServiceImpl implements TaskTimelineService {
                 .eq(TaskTimeline::getTaskId, taskId)
                 .orderByDesc(TaskTimeline::getId));
     }
+
+    @Override
+    public List<TaskTimeline> listStatusEventsByProject(Long projectId) {
+        if (projectId == null) return List.of();
+        return mapper.selectList(Wrappers.<TaskTimeline>lambdaQuery()
+                .eq(TaskTimeline::getProjectId, projectId)
+                .in(TaskTimeline::getType, TaskTimelineType.CREATED, TaskTimelineType.STATUS_CHANGED)
+                .orderByAsc(TaskTimeline::getCreateTime));
+    }
+
+    @Override
+    public List<TaskTimeline> listStatusEventsByProjectIds(List<Long> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) return List.of();
+        return mapper.selectList(Wrappers.<TaskTimeline>lambdaQuery()
+                .in(TaskTimeline::getProjectId, projectIds)
+                .in(TaskTimeline::getType, TaskTimelineType.CREATED, TaskTimelineType.STATUS_CHANGED)
+                .orderByAsc(TaskTimeline::getCreateTime));
+    }
 }

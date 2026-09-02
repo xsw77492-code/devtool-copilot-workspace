@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NDatePicker, NInput, NSelect, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NButton, NConfigProvider, NDatePicker, NDropdown, NInput, NSelect, NSpin, dateZhCN, useDialog, useMessage, zhCN } from 'naive-ui'
 import { projectAuditApi, type ProjectAuditItem } from '../api/projectAudit'
 import { useRealtimeStore } from '../stores/realtime'
 import PresenceBar from '../components/PresenceBar.vue'
@@ -23,10 +23,23 @@ const deletingId = ref<number | null>(null)
 const list = ref<ProjectAuditItem[]>([])
 const cursor = ref<number | null>(null)
 const hasMore = ref(true)
+const loadError = ref('')
 
 const action = ref<string>('')
 const q = ref('')
 const range = ref<[number, number] | null>(null)
+
+const headMoreOptions = computed(() => [
+  { key: 'back', label: '返回项目' },
+  { key: 'refresh', label: '刷新', disabled: loading.value || loadingMore.value },
+  { key: 'clear', label: '清空', disabled: clearing.value }
+])
+
+function onHeadMoreSelect(key: string | number) {
+  if (key === 'back') router.push({ name: 'project-detail', params: { id: projectId.value } })
+  if (key === 'refresh') void load(true)
+  if (key === 'clear') void clearAll()
+}
 
 const limit = 100
 
@@ -47,11 +60,45 @@ const actionOptions = [
   { label: '创建项目', value: 'PROJECT_CREATED' }
 ]
 
+const actionLabels: Record<string, string> = Object.fromEntries(
+  actionOptions.filter((o) => o.value).map((o) => [o.value, o.label])
+) as Record<string, string>
+
+actionLabels.MEMBER_ENABLED = '启用成员'
+actionLabels.MEMBER_OWNER_TRANSFERRED = '转让所有权'
+
+function actionLabelOf(action: string) {
+  return actionLabels[action] || action
+}
+
 function fmtTime(v?: string | null) {
   if (!v) return ''
   const d = new Date(v)
   if (Number.isNaN(d.getTime())) return String(v)
   return d.toLocaleString()
+}
+
+function fmtRelativeTime(v?: string | null) {
+  if (!v) return ''
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return String(v)
+  const diff = Date.now() - d.getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h} 小时前`
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  if (startOfDay === startOfToday) return `今天 ${fmtHM(d)}`
+  if (startOfDay === startOfToday - 86400000) return `昨天 ${fmtHM(d)}`
+  if (h < 24 * 7) return `${Math.floor(h / 24)} 天前`
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+function fmtHM(d: Date) {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 function titleOf(a: ProjectAuditItem) {
@@ -138,6 +185,7 @@ async function load(reset?: boolean) {
       return
     }
     message.error(e?.message || '加载失败')
+    loadError.value = e?.message || '加载失败'
     hasMore.value = false
   } finally {
     loading.value = false
@@ -232,38 +280,32 @@ watch(
 
 <template>
   <div class="page lightPage">
-    <div class="head">
-      <div class="left">
-        <h1 class="h1">审计日志</h1>
-      </div>
-      <div class="right">
-        <presence-bar :project-id="projectId" />
-        <n-button tertiary @click="router.push({ name: 'project-detail', params: { id: projectId } })">返回项目</n-button>
-        <button class="btnTealSm" :disabled="exporting" @click="exportCsv">
-          <span>导出 CSV</span>
-          <span v-if="exporting" class="spinSm" />
-        </button>
-        <button class="btnGhostSm" :disabled="loading || loadingMore" @click="load(true)">刷新</button>
-        <button class="btnGhostSm dangerSm" :disabled="clearing" @click="clearAll">
-          <span>清空</span>
-          <span v-if="clearing" class="spinSm" />
-        </button>
-      </div>
-    </div>
-
     <section class="panel lightPanel">
-      <div class="topbar">
-        <div class="muted">已加载 {{ list.length }} 条</div>
+      <div class="panelHead">
         <div class="filters">
           <n-select v-model:value="action" :options="actionOptions" size="small" class="fSel" />
-          <n-input v-model:value="q" size="small" placeholder="关键词（summary/detail）" class="fInput" @keyup.enter="load(true)" />
-          <n-date-picker v-model:value="range" type="datetimerange" clearable size="small" class="fDate" />
-          <button class="btnTealSm" @click="load(true)">筛选</button>
+          <n-input v-model:value="q" size="small" placeholder="关键词（摘要/详情）" class="fInput" @keyup.enter="load(true)" />
+          <n-config-provider :locale="zhCN" :date-locale="dateZhCN">
+            <n-date-picker v-model:value="range" type="datetimerange" clearable size="small" class="fDate" />
+          </n-config-provider>
+          <n-button size="small" secondary class="accentBtn" @click="load(true)">筛选</n-button>
+        </div>
+        <div class="headActions">
+          <presence-bar :project-id="projectId" />
+          <n-button secondary class="accentBtn" :loading="exporting" @click="exportCsv">导出 CSV</n-button>
+          <n-dropdown :options="headMoreOptions" trigger="click" placement="bottom-end" @select="onHeadMoreSelect">
+            <n-button tertiary>更多</n-button>
+          </n-dropdown>
         </div>
       </div>
 
+      <div class="statLine" v-if="list.length || loading">
+        <span>已加载 {{ list.length }} 条记录</span>
+      </div>
+
       <n-spin :show="loading">
-        <div v-if="!list.length && !loading" class="emptyState">
+        <div v-if="loadError && !loading" class="emptyState err">{{ loadError }}</div>
+        <div v-else-if="!list.length && !loading" class="emptyState">
           <div class="emptyTitle">暂无审计记录</div>
         </div>
 
@@ -275,9 +317,9 @@ watch(
             <div class="content">
               <div class="t">{{ titleOf(a) }}</div>
               <div class="s muted">
-                <span>{{ fmtTime(a.createTime) }}</span>
+                <span :title="fmtTime(a.createTime)">{{ fmtRelativeTime(a.createTime) }}</span>
                 <span v-if="a.ip"> · {{ a.ip }}</span>
-                <span v-if="a.action"> · {{ a.action }}</span>
+                <span v-if="a.action"> · {{ actionLabelOf(a.action) }}</span>
               </div>
               <div v-if="detailPreview(a)" class="d muted">{{ detailPreview(a) }}</div>
             </div>
@@ -290,6 +332,8 @@ watch(
         <div v-if="list.length && hasMore" class="more">
           <n-button :loading="loadingMore" @click="load(false)">加载更多</n-button>
         </div>
+
+        <div v-if="list.length && !hasMore && !loading" class="end">已加载全部</div>
       </n-spin>
     </section>
   </div>
@@ -297,25 +341,37 @@ watch(
 
 <style scoped>
 .lightPage {
-  background: #ffffff;
+  background: transparent;
   color: #0f172a;
 }
 
 .lightPanel {
-  background:
-    radial-gradient(900px 420px at 12% 0%, rgba(6, 182, 212, 0.10), transparent 58%),
-    #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: 0 16px 45px rgba(2, 6, 23, 0.06);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
-.topbar {
+.panelHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.accentBtn {
+  background: #fff !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+  color: #0f172a !important;
+  transition: transform 160ms ease, filter 160ms ease;
+}
+
+.accentBtn:hover {
+  background: rgba(15, 23, 42, 0.04) !important;
+  border-color: rgba(15, 23, 42, 0.28) !important;
+  color: #0f172a !important;
+  transform: translateY(-1px);
 }
 
 .filters {
@@ -323,7 +379,15 @@ watch(
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .fSel {
@@ -338,103 +402,36 @@ watch(
   width: 320px;
 }
 
-.btnTealSm {
-  display: inline-flex;
+.statLine {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 12px;
-  background: rgba(20, 184, 166, 0.92);
-  color: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(13, 148, 136, 0.22);
+  justify-content: space-between;
+  padding: 12px 6px 0;
   font-size: 12px;
-  font-weight: 800;
-  letter-spacing: -0.2px;
-  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
-}
-
-.btnTealSm:hover {
-  transform: translateY(-1px);
-  background: rgba(13, 148, 136, 0.98);
-  box-shadow: 0 14px 38px rgba(2, 6, 23, 0.10);
-}
-
-.btnTealSm:disabled {
-  opacity: 0.58;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-.btnGhostSm {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  color: rgba(15, 23, 42, 0.88);
-  border: 1px solid rgba(20, 184, 166, 0.22);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: -0.2px;
-  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background 140ms ease;
-}
-
-.btnGhostSm:hover {
-  transform: translateY(-1px);
-  border-color: rgba(20, 184, 166, 0.30);
-  background: rgba(20, 184, 166, 0.06);
-  box-shadow: 0 14px 38px rgba(2, 6, 23, 0.06);
-}
-
-.btnGhostSm:disabled {
-  opacity: 0.58;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-.spinSm {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.38);
-  border-top-color: rgba(255, 255, 255, 0.96);
-  animation: spin 900ms linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  color: rgba(15, 23, 42, 0.45);
 }
 
 .timeline {
-  margin-top: 14px;
+  margin-top: 6px;
   display: grid;
-  gap: 10px;
+  gap: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .item {
   display: grid;
   grid-template-columns: 22px 1fr auto;
   gap: 12px;
-  padding: 14px 14px;
-  border-radius: 18px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.92);
-  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+  padding: 14px 6px;
+  border-radius: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: transparent;
+  transition: background 140ms ease;
 }
 
 .item:hover {
-  transform: translateY(-1px);
-  border-color: rgba(20, 184, 166, 0.22);
-  box-shadow: 0 14px 40px rgba(2, 6, 23, 0.08);
+  background: rgba(15, 23, 42, 0.03);
 }
 
 .actions {
@@ -477,9 +474,9 @@ watch(
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  background: rgba(20, 184, 166, 0.95);
+  background: rgba(15, 23, 42, 0.55);
   margin-top: 18px;
-  box-shadow: 0 0 0 6px rgba(20, 184, 166, 0.12);
+  box-shadow: 0 0 0 6px rgba(15, 23, 42, 0.06);
 }
 
 .t {
@@ -498,5 +495,24 @@ watch(
   display: flex;
   justify-content: center;
   padding-top: 14px;
+}
+
+.end {
+  display: flex;
+  justify-content: center;
+  padding-top: 14px;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.4);
+}
+
+.emptyState {
+  padding: 48px 0 24px;
+  text-align: center;
+  color: rgba(15, 23, 42, 0.55);
+  font-size: 13px;
+}
+
+.emptyState.err {
+  color: rgba(220, 38, 38, 0.85);
 }
 </style>

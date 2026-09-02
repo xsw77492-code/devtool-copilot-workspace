@@ -48,6 +48,77 @@ export interface ProjectActivityItem {
   createTime: string
 }
 
+export interface TeamDigest {
+  memberCount: number
+  onlineCount: number
+  ownerCount: number
+  disabledCount: number
+  pendingInviteCount: number
+  groupCount: number
+}
+
+export interface TeamContactItem {
+  userId: number
+  username: string
+  email: string
+  roles: string[]
+  groupIds: number[]
+  groupNames: string[]
+  groupCount: number
+  online: number
+  disabled: number
+  lastSeenAt?: string | null
+}
+
+export interface TeamGroupItem {
+  groupId: number
+  groupName: string
+  myRole: string
+  ownerUserId: number
+  systemGroup: boolean
+  memberCount: number
+  onlineCount: number
+  ownerCount: number
+  pendingInviteCount: number
+  latestSignal: string
+  topMembers: string[]
+}
+
+export interface TeamInviteItem {
+  id: number
+  groupId: number
+  groupName: string
+  email: string
+  role: string
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' | 'CANCELED'
+  expireTime?: string | null
+  createTime: string
+}
+
+export interface TeamActivityItem {
+  id: number
+  groupId: number
+  groupName: string
+  actorUsername?: string | null
+  type: string
+  detail: string
+  createTime: string
+}
+
+export interface TeamCenterResponse {
+  digest: TeamDigest
+  contacts: TeamContactItem[]
+  groups: TeamGroupItem[]
+  invites: TeamInviteItem[]
+  activities: TeamActivityItem[]
+}
+
+export interface TeamGroupInviteCreateResponse {
+  inviteId: number
+  inviteToken: string
+  inviteLink: string
+}
+
 export const projectCollabApi = {
   async members(projectId: number) {
     return apiGet<ProjectMembersResponse>(`/api/project/${projectId}/members`)
@@ -105,11 +176,79 @@ export const projectCollabApi = {
     return apiGet<ProjectActivityItem[]>(`/api/project/${projectId}/activities`, { limit })
   },
 
+  async teamCenter(groupId?: number | null) {
+    return apiGet<TeamCenterResponse>('/api/project/team/center', { groupId: groupId || undefined })
+  },
+
+  async createTeamGroup(name: string) {
+    return apiPost<number>('/api/project/team/groups', { name })
+  },
+
+  async renameTeamGroup(groupId: number, name: string) {
+    return apiPut<void>(`/api/project/team/groups/${groupId}`, { name })
+  },
+
+  async deleteTeamGroup(groupId: number) {
+    return apiDelete<void>(`/api/project/team/groups/${groupId}`)
+  },
+
+  async inviteToTeamGroup(groupId: number, email: string) {
+    return apiPost<TeamGroupInviteCreateResponse>(`/api/project/team/groups/${groupId}/invites`, { email })
+  },
+
+  async acceptTeamGroupInvite(token: string) {
+    return apiPost<number>('/api/project/team/invites/accept', { token })
+  },
+
+  async rejectTeamGroupInvite(token: string) {
+    return apiPost<number>('/api/project/team/invites/reject', { token })
+  },
+
+  async cancelTeamGroupInvite(groupId: number, inviteId: number) {
+    return apiDelete<void>(`/api/project/team/groups/${groupId}/invites/${inviteId}`)
+  },
+
+  async reissueTeamGroupInvite(groupId: number, inviteId: number) {
+    return apiPost<TeamGroupInviteCreateResponse>(`/api/project/team/groups/${groupId}/invites/${inviteId}/reissue`)
+  },
+
+  async removeTeamGroupMember(groupId: number, userId: number) {
+    return apiDelete<void>(`/api/project/team/groups/${groupId}/members/${userId}`)
+  },
+
+  async leaveTeamGroup(groupId: number) {
+    return apiDelete<void>(`/api/project/team/groups/${groupId}/members/me`)
+  },
+
+  async transferTeamGroupOwner(groupId: number, userId: number) {
+    return apiPost<void>(`/api/project/team/groups/${groupId}/members/${userId}/transfer-owner`)
+  },
+
   async deleteActivity(projectId: number, activityId: number) {
     return apiDelete<void>(`/api/project/${projectId}/activities/${activityId}`)
   },
 
   async clearActivities(projectId: number) {
     return apiDelete<number>(`/api/project/${projectId}/activities`)
+  },
+
+  teamInvitesMine(): Promise<TeamInviteItem[]> {
+    return apiGet<TeamInviteItem[]>('/api/project/team/invites/mine')
+  },
+
+  acceptTeamGroupInviteById(inviteId: number): Promise<number> {
+    return apiPost<number>(`/api/project/team/invites/${inviteId}/accept-by-id`, {})
+  },
+
+  rejectTeamGroupInviteById(inviteId: number): Promise<number> {
+    return apiPost<number>(`/api/project/team/invites/${inviteId}/reject-by-id`, {})
+  },
+
+  async deleteTeamActivity(groupId: number, activityId: number) {
+    return apiDelete<void>(`/api/project/team/groups/${groupId}/activities/${activityId}`)
+  },
+
+  async clearTeamActivities(groupId: number) {
+    return apiDelete<number>(`/api/project/team/groups/${groupId}/activities`)
   }
 }

@@ -6,5 +6,6 @@ import lombok.Data;
 public class AiAgentApplyRequestDTO {
     private Long projectId;
     private AiAgentPlanResponseDTO plan;
+    private Long milestoneId;
+    private Long parentTaskId;
 }
-

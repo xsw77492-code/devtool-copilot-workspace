@@ -6,6 +6,10 @@ export interface UserMe {
   email: string
   role: 'USER' | 'ADMIN'
   disabled: number
+  nickname?: string | null
+  avatarUrl?: string | null
+  signature?: string | null
+  status?: string | null
   lastLoginTime: string | null
   createTime: string
 }

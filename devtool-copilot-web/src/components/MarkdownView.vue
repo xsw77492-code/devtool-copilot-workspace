@@ -33,7 +33,9 @@ const html = computed(() => {
       return `<pre class="hljs"><code class="hljs">${inst.utils.escapeHtml(code)}</code></pre>`
     }
   })
-  const raw = props.allowDetails ? stripUnsafeHtml(props.content || '') : String(props.content || '')
+  let raw = props.allowDetails ? stripUnsafeHtml(props.content || '') : String(props.content || '')
+  // 兼容「##标题」无空格的 ATX 标题：在行首连续的 # 后补一个空格
+  raw = raw.replace(/^(\s{0,3}#{1,6})([^\s#])/gm, '$1 $2')
   return inst.render(raw)
 })
 
@@ -105,18 +107,43 @@ async function onClick(e: MouseEvent) {
 </template>
 
 <style scoped>
+.md {
+  color: #1e293b;
+  font-size: 14px;
+  line-height: 1.7;
+  word-wrap: break-word;
+}
 .md :deep(h1) {
   font-size: 18px;
   margin: 14px 0 10px;
   letter-spacing: -0.2px;
+  color: #0f172a;
 }
 .md :deep(h2) {
+  font-size: 15px;
+  margin: 14px 0 8px;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-left: 3px solid #6366f1;
+  padding-left: 8px;
+}
+.md :deep(h3) {
   font-size: 14px;
-  margin: 12px 0 8px;
+  margin: 12px 0 6px;
+  color: #1e293b;
 }
 .md :deep(p) {
   margin: 8px 0;
-  line-height: 1.65;
+  line-height: 1.7;
+  color: #334155;
+}
+.md :deep(strong) {
+  font-weight: 600;
+  color: #0f172a;
+  background: linear-gradient(transparent 60%, #fef08a 60%);
+  padding: 0 2px;
 }
 .md :deep(ul) {
   margin: 8px 0;
@@ -124,8 +151,30 @@ async function onClick(e: MouseEvent) {
 }
 .md :deep(li) {
   margin: 6px 0;
+  color: #334155;
+}
+.md :deep(hr) {
+  border: none;
+  border-top: 1px dashed #cbd5e1;
+  margin: 14px 0;
 }
 .md :deep(a) {
   color: var(--accent);
+}
+.md :deep(code) {
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: #be185d;
+}
+.md :deep(blockquote) {
+  border-left: 3px solid #cbd5e1;
+  padding: 4px 10px;
+  margin: 8px 0;
+  color: #475569;
+  background: #f8fafc;
+  border-radius: 0 6px 6px 0;
 }
 </style>

@@ -68,6 +68,14 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- 开发期热重启：mvn spring-boot:run 时修改 Java 代码自动重启，打包产物不含此依赖 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

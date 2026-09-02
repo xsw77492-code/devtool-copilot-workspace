@@ -6,6 +6,8 @@ import { taskApi, type Task, type TaskBoardView, type TaskStatus } from '../api/
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
 import { useRealtimeStore } from '../stores/realtime'
+import LineChart from '../components/charts/LineChart.vue'
+import ProjectAiPlannerModal from '../components/ProjectAiPlannerModal.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -18,10 +20,40 @@ const rt = useRealtimeStore()
 const loading = ref(false)
 const projectId = ref<number | null>(null)
 const tasks = ref<Task[]>([])
+const plannerOpen = ref(false)
 const boardWrapRef = ref<HTMLElement | null>(null)
 const colBodyRef = reactive<Record<TaskStatus, HTMLElement | null>>({ TODO: null, DOING: null, DONE: null })
 
-const projectOptions = computed(() => ps.visibleProjects.map((p) => ({ label: p.name || `项目 #${p.id}`, value: p.id })))
+const projectOptions = computed(() => {
+  const opts = ps.visibleProjects.map((p) => ({ label: p.name || `项目 #${p.id}`, value: p.id }))
+  const pid = Number(projectId.value || 0)
+  if (pid && !opts.some((o) => Number(o.value) === pid)) {
+    const cur = ps.projects.find((p) => Number(p.id) === pid) as any
+    if (cur && Number(cur.archived || 0) === 1) {
+      opts.unshift({ label: `${cur.name || `项目 #${cur.id}`} · 已归档`, value: cur.id })
+    }
+  }
+  return opts
+})
+
+const isArchived = computed(() => {
+  const pid = Number(projectId.value || 0)
+  if (!pid) return false
+  const p = ps.projects.find((x) => Number(x.id) === pid) as any
+  return Number(p?.archived || 0) === 1
+})
+
+const currentProjectName = computed(() => {
+  const pid = Number(projectId.value || 0)
+  if (!pid) return ''
+  const p = ps.projects.find((x) => Number(x.id) === pid) as any
+  return p?.name || `项目 #${pid}`
+})
+
+function onPlannerApplied() {
+  plannerOpen.value = false
+  load()
+}
 
 type FilterMode = 'all' | 'mine' | 'unassigned' | 'participated'
 
@@ -43,12 +75,12 @@ const savingView = ref(false)
 let autoRefreshTimer: any = null
 
 const viewColors = [
-  { key: 'teal', rgb: '20, 184, 166' },
-  { key: 'cyan', rgb: '14, 165, 233' },
-  { key: 'amber', rgb: '245, 158, 11' },
-  { key: 'rose', rgb: '244, 63, 94' },
-  { key: 'emerald', rgb: '16, 185, 129' },
-  { key: 'slate', rgb: '100, 116, 139' }
+  { key: 'teal', rgb: '15, 23, 42' },
+  { key: 'cyan', rgb: '51, 65, 85' },
+  { key: 'amber', rgb: '100, 116, 139' },
+  { key: 'rose', rgb: '148, 163, 184' },
+  { key: 'emerald', rgb: '203, 213, 225' },
+  { key: 'slate', rgb: '15, 23, 42' }
 ]
 
 const activeView = computed(() => (activeViewId.value ? viewItems.value.find((x) => x.id === activeViewId.value) : null))
@@ -56,14 +88,6 @@ const activeViewColor = computed(() => String(activeView.value?.color || '').tri
 
 function myId() {
   return Number(auth.me?.id || 0)
-}
-
-function dueMeta(t: Task) {
-  const ms = t?.dueTime ? Date.parse(t.dueTime) : NaN
-  if (!Number.isFinite(ms)) return null
-  const now = Date.now()
-  if (ms >= now) return { level: 'future' as const, sort: ms }
-  return { level: 'overdue' as const, sort: ms }
 }
 
 function sortKey(t: Task) {
@@ -89,6 +113,36 @@ const filteredTasks = computed(() => {
   return list
 })
 
+const taskTitleById = computed(() => {
+  const map = new Map<number, string>()
+  for (const t of tasks.value) {
+    if (!t || !t.id) continue
+    map.set(t.id, String(t.title || `#${t.id}`))
+  }
+  return map
+})
+
+function parentTitle(pid: number) {
+  return taskTitleById.value.get(pid) || `#${pid}`
+}
+
+const childStatsByParent = computed(() => {
+  const map = new Map<number, { total: number; done: number }>()
+  for (const t of tasks.value) {
+    const pid = Number(t.parentTaskId || 0)
+    if (!pid) continue
+    const cur = map.get(pid) || { total: 0, done: 0 }
+    cur.total += 1
+    if (String(t.status || '') === 'DONE') cur.done += 1
+    map.set(pid, cur)
+  }
+  return map
+})
+
+function childStat(pid: number) {
+  return childStatsByParent.value.get(pid) || { total: 0, done: 0 }
+}
+
 const columns = computed(() => {
   const g: Record<TaskStatus, Task[]> = { TODO: [], DOING: [], DONE: [] }
   for (const t of filteredTasks.value) {
@@ -102,6 +156,123 @@ const columns = computed(() => {
   }
   return g
 })
+
+// ─── 数据窗（融合统计） ───
+const winOpen = reactive<Record<'trend' | 'member' | 'risk', boolean>>({ trend: false, member: false, risk: false })
+
+function loadWinState() {
+  try {
+    const s = localStorage.getItem('dtc_board_windows')
+    if (!s) return
+    const o = JSON.parse(s) as Record<string, unknown>
+    if (o && typeof o === 'object') {
+      if (o.trend) winOpen.trend = true
+      if (o.member) winOpen.member = true
+      if (o.risk) winOpen.risk = true
+    }
+  } catch {
+    /* ignore */
+  }
+}
+loadWinState()
+
+watch(
+  winOpen,
+  (v) => {
+    try {
+      localStorage.setItem('dtc_board_windows', JSON.stringify(v))
+    } catch {
+      /* ignore */
+    }
+  },
+  { deep: true }
+)
+
+function toggleWin(k: 'trend' | 'member' | 'risk') {
+  winOpen[k] = !winOpen[k]
+}
+
+function tsOf(v?: string | number | null): number {
+  if (v === undefined || v === null || v === '') return NaN
+  const n = Number(v)
+  if (Number.isFinite(n)) return n > 10000000000 ? n : n * 1000
+  const d = new Date(String(v)).getTime()
+  return Number.isFinite(d) ? d : NaN
+}
+
+type MemberStat = { name: string; total: number; done: number }
+
+const stat = computed(() => {
+  const list = filteredTasks.value
+  const now = Date.now()
+  let todo = 0
+  let doing = 0
+  let done = 0
+  let overdue = 0
+  const memberMap = new Map<string, MemberStat>()
+  for (const t of list) {
+    if (t.status === 'TODO') todo += 1
+    else if (t.status === 'DOING') doing += 1
+    else if (t.status === 'DONE') done += 1
+    const due = tsOf(t.dueTime)
+    if (t.status !== 'DONE' && Number.isFinite(due) && due < now) overdue += 1
+    const name = String(t.assignee || '').trim() || '未分配'
+    const cur = memberMap.get(name) || { name, total: 0, done: 0 }
+    cur.total += 1
+    if (t.status === 'DONE') cur.done += 1
+    memberMap.set(name, cur)
+  }
+  const total = todo + doing + done
+  const rate = total ? Math.round((done / total) * 100) : 0
+  const members = [...memberMap.values()].sort((a, b) => b.total - a.total)
+  return { todo, doing, done, overdue, total, rate, members }
+})
+
+const trend7 = computed(() => {
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6)
+  const startMs = start.getTime()
+  const days: Array<{ label: string; value: number }> = []
+  for (let i = 0; i < 7; i += 1) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i)
+    days.push({ label: `${d.getMonth() + 1}/${d.getDate()}`, value: 0 })
+  }
+  for (const t of filteredTasks.value) {
+    const ts = tsOf(t.createdAt ?? t.createTime)
+    if (!Number.isFinite(ts) || ts < startMs || ts > now.getTime()) continue
+    const d = new Date(ts)
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+    const idx = Math.round((dayStart - startMs) / 86400000)
+    if (idx >= 0 && idx < 7) days[idx].value += 1
+  }
+  return days
+})
+
+const trendTotal = computed(() => trend7.value.reduce((s, p) => s + p.value, 0))
+
+const riskTasks = computed(() => {
+  const now = Date.now()
+  const list = filteredTasks.value.filter((t) => {
+    if (t.status === 'DONE') return false
+    if (String(t.priority || '').toUpperCase() === 'HIGH') return true
+    const due = tsOf(t.dueTime)
+    return Number.isFinite(due) && due < now
+  })
+  return list
+    .slice()
+    .sort((a, b) => {
+      const da = tsOf(a.dueTime)
+      const db = tsOf(b.dueTime)
+      return (Number.isFinite(da) ? da : Infinity) - (Number.isFinite(db) ? db : Infinity)
+    })
+    .slice(0, 5)
+})
+
+function overdueDays(t: Task): number {
+  const due = tsOf(t.dueTime)
+  if (!Number.isFinite(due)) return 0
+  return Math.max(0, Math.floor((Date.now() - due) / 86400000))
+}
 
 async function load() {
   if (!projectId.value) return
@@ -129,6 +300,23 @@ function timeShort(v?: string) {
   return sameYear ? `${mm}-${dd} ${hh}:${mi}` : `${d.getFullYear()}-${mm}-${dd} ${hh}:${mi}`
 }
 
+function priorityLabel(s?: string | null) {
+  const v = String(s || '').toUpperCase()
+  if (v === 'HIGH') return '高'
+  if (v === 'MEDIUM') return '中'
+  if (v === 'LOW') return '低'
+  return v
+}
+
+type PriorityTone = 'high' | 'medium' | 'low' | 'na'
+function priorityTone(s?: string | null): PriorityTone {
+  const v = String(s || '').toUpperCase()
+  if (v === 'HIGH') return 'high'
+  if (v === 'MEDIUM') return 'medium'
+  if (v === 'LOW') return 'low'
+  return 'na'
+}
+
 function openTask(t: Task) {
   if (!t || !t.id || !t.projectId) return
   router.push({ name: 'task-detail', params: { projectId: t.projectId, taskId: t.id } })
@@ -138,6 +326,7 @@ const dragging = ref<{ taskId: number; from: TaskStatus } | null>(null)
 const over = ref<{ to: TaskStatus; index: number } | null>(null)
 
 function onDragStart(t: Task) {
+  if (isArchived.value) return
   dragging.value = { taskId: t.id, from: t.status }
 }
 
@@ -191,6 +380,12 @@ function onCardDragOver(e: DragEvent, to: TaskStatus, index: number) {
 }
 
 async function onDrop(to: TaskStatus) {
+  if (isArchived.value) {
+    message.warning('项目已归档，只读')
+    dragging.value = null
+    over.value = null
+    return
+  }
   const d = dragging.value
   const o = over.value
   if (!d || !o || !projectId.value) return
@@ -296,6 +491,10 @@ const quickCreate = reactive<{ status: TaskStatus | null; title: string; creatin
 
 function openQuickCreate(status: TaskStatus) {
   if (!projectId.value) return
+  if (isArchived.value) {
+    message.warning('项目已归档，只读')
+    return
+  }
   quickCreate.status = status
   quickCreate.title = ''
 }
@@ -307,6 +506,10 @@ function closeQuickCreate() {
 
 async function submitQuickCreate() {
   if (!projectId.value || !quickCreate.status) return
+  if (isArchived.value) {
+    message.warning('项目已归档，只读')
+    return
+  }
   const title = quickCreate.title.trim()
   if (!title) return
   if (quickCreate.creating) return
@@ -407,6 +610,10 @@ async function loadParticipated() {
 }
 
 function openSaveView() {
+  if (isArchived.value) {
+    message.warning('项目已归档，只读')
+    return
+  }
   viewName.value = String(activeView.value?.name || '').trim()
   viewColor.value = activeViewColor.value || 'teal'
   viewModalOpen.value = true
@@ -414,6 +621,10 @@ function openSaveView() {
 
 async function saveViewAsNew() {
   if (!projectId.value) return
+  if (isArchived.value) {
+    message.warning('项目已归档，只读')
+    return
+  }
   const name = viewName.value.trim()
   if (!name) {
     message.warning('请输入视图名称')
@@ -435,6 +646,10 @@ async function saveViewAsNew() {
 
 async function updateActiveView() {
   if (!activeViewId.value) return
+  if (isArchived.value) {
+    message.warning('项目已归档，只读')
+    return
+  }
   const name = viewName.value.trim()
   if (!name) {
     message.warning('请输入视图名称')
@@ -456,6 +671,10 @@ async function updateActiveView() {
 
 async function deleteActiveView() {
   if (!activeViewId.value) return
+  if (isArchived.value) {
+    message.warning('项目已归档，只读')
+    return
+  }
   try {
     await taskApi.deleteView(activeViewId.value)
     activeViewId.value = null
@@ -635,17 +854,7 @@ watch(
 </script>
 
 <template>
-  <div class="page lightPage">
-    <div class="head">
-      <div class="left">
-        <h1 class="h1">看板</h1>
-      </div>
-      <div class="right">
-        <n-button tertiary @click="router.push({ name: 'workspace' })">工作台</n-button>
-        <n-button tertiary @click="load">刷新</n-button>
-      </div>
-    </div>
-
+  <div class="page boardPage">
     <div class="filters">
       <n-select
         :value="projectId || 0"
@@ -673,9 +882,137 @@ watch(
         <label class="ck muted">
           <n-checkbox v-model:checked="showSubtasks" />子任务
         </label>
-        <button class="btnGhost" type="button" @click="openSaveView">保存视图</button>
-        <button v-if="activeViewId" class="btnGhost danger" type="button" @click="deleteActiveView">删除</button>
+        <button class="btnGhost" type="button" :disabled="isArchived" @click="openSaveView">保存视图</button>
+        <button v-if="activeViewId" class="btnGhost danger" type="button" :disabled="isArchived" @click="deleteActiveView">删除</button>
+        <button class="btnDark" type="button" :disabled="isArchived || !projectId" @click="plannerOpen = true">AI 规划</button>
       </div>
+    </div>
+
+    <ProjectAiPlannerModal
+      :show="plannerOpen"
+      :project-id="Number(projectId || 0)"
+      :project-name="currentProjectName"
+      :archived="isArchived"
+      @update:show="(v: boolean) => (plannerOpen = v)"
+      @applied="onPlannerApplied"
+    />
+
+    <div class="statBar">
+      <div class="kpis">
+        <div class="kpi">
+          <div class="kpiNum">{{ stat.todo }}</div>
+          <div class="kpiLabel">待办</div>
+        </div>
+        <div class="kpi">
+          <div class="kpiNum">{{ stat.doing }}</div>
+          <div class="kpiLabel">进行中</div>
+        </div>
+        <div class="kpi">
+          <div class="kpiNum">{{ stat.done }}</div>
+          <div class="kpiLabel">已完成</div>
+        </div>
+        <div class="kpi">
+          <div class="kpiNum" :class="{ warn: stat.overdue > 0 }">{{ stat.overdue }}</div>
+          <div class="kpiLabel">逾期</div>
+        </div>
+        <div class="rate">
+          <div class="rateTop">
+            <span class="rateLabel">完成率</span>
+            <span class="rateVal">{{ stat.rate }}%</span>
+          </div>
+          <div class="rateTrack">
+            <div class="rateFill" :style="{ width: `${stat.rate}%` }" />
+          </div>
+        </div>
+      </div>
+      <div class="winToggles">
+        <span class="winCap">数据窗</span>
+        <button class="winBtn" :class="{ on: winOpen.trend }" type="button" @click="toggleWin('trend')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M4 19V5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <path d="M4 19h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <path d="m7 14 3.2-3.4 2.6 2.2L18 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          趋势
+        </button>
+        <button class="winBtn" :class="{ on: winOpen.member }" type="button" @click="toggleWin('member')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M12 12a3.6 3.6 0 1 0 0-7.2A3.6 3.6 0 0 0 12 12Z" stroke="currentColor" stroke-width="1.8" />
+            <path d="M5.5 19.4c1-3 3.4-4.7 6.5-4.7s5.5 1.7 6.5 4.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+          成员
+        </button>
+        <button class="winBtn" :class="{ on: winOpen.risk }" type="button" @click="toggleWin('risk')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M12 4.2 21 19H3L12 4.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+            <path d="M12 9.5v4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <path d="M12 16.6h.01" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+          </svg>
+          风险
+        </button>
+      </div>
+    </div>
+
+    <div v-if="winOpen.trend || winOpen.member || winOpen.risk" class="winGrid">
+      <section v-if="winOpen.trend" class="winCard">
+        <header class="winHead">
+          <h3 class="winTitle">近 7 天新增</h3>
+          <span class="muted winSub">按创建时间统计</span>
+          <button class="winClose" type="button" @click="toggleWin('trend')">×</button>
+        </header>
+        <template v-if="trendTotal > 0">
+          <LineChart :points="trend7" :height="150" />
+        </template>
+        <template v-else>
+          <div class="winEmpty">
+            <p class="muted">近 7 天还没有新增任务</p>
+            <button class="btnGhost" type="button" :disabled="isArchived" @click="openQuickCreate('TODO')">创建第一个任务</button>
+          </div>
+        </template>
+      </section>
+
+      <section v-if="winOpen.member" class="winCard">
+        <header class="winHead">
+          <h3 class="winTitle">成员分布</h3>
+          <span class="muted winSub">按负责人统计</span>
+          <button class="winClose" type="button" @click="toggleWin('member')">×</button>
+        </header>
+        <div v-if="stat.members.length" class="memList">
+          <div v-for="m in stat.members" :key="m.name" class="memRow">
+            <span class="memAvatar">{{ m.name.slice(0, 1).toUpperCase() }}</span>
+            <span class="memName">{{ m.name }}</span>
+            <span class="memBar"><i :style="{ width: m.total ? `${Math.round((m.done / m.total) * 100)}%` : '0%' }" /></span>
+            <span class="memNum">{{ m.done }}/{{ m.total }}</span>
+          </div>
+        </div>
+        <div v-else class="winEmpty">
+          <p class="muted">任务尚未分配负责人</p>
+        </div>
+      </section>
+
+      <section v-if="winOpen.risk" class="winCard">
+        <header class="winHead">
+          <h3 class="winTitle">风险</h3>
+          <span class="muted winSub">逾期与高优先级</span>
+          <button class="winClose" type="button" @click="toggleWin('risk')">×</button>
+        </header>
+        <template v-if="riskTasks.length">
+          <ul class="riskList">
+            <li v-for="t in riskTasks" :key="t.id" class="riskItem" @click="openTask(t)">
+              <span class="riskDot" :class="{ warn: overdueDays(t) > 0 }" />
+              <span class="riskTitle">{{ t.title }}</span>
+              <span v-if="overdueDays(t) > 0" class="pill riskDays">逾期 {{ overdueDays(t) }} 天</span>
+              <span v-else class="pill riskHigh">高优</span>
+            </li>
+          </ul>
+        </template>
+        <template v-else>
+          <div class="winEmpty ok">
+            <span class="okDot" />
+            <p>无逾期任务 · 无高优先级阻塞</p>
+          </div>
+        </template>
+      </section>
     </div>
 
     <section class="panel lightPanel">
@@ -691,7 +1028,7 @@ watch(
               <div class="colTitle">TODO</div>
               <div class="colRight">
                 <span class="pill count">{{ columns.TODO.length }}</span>
-                <button class="iconBtn" type="button" @click="openQuickCreate('TODO')">+</button>
+                <button class="iconBtn" type="button" :disabled="isArchived" @click="openQuickCreate('TODO')">+</button>
               </div>
             </div>
             <div :ref="(el) => setColBodyEl('TODO', el)" class="colBody">
@@ -714,7 +1051,7 @@ watch(
               </div>
               <div v-else-if="!columns.TODO.length" class="emptyCol">
                 <div class="muted">这里还没有任务</div>
-                <button class="btnGhost" type="button" @click="openQuickCreate('TODO')">添加任务</button>
+                <button class="btnGhost" type="button" :disabled="isArchived" @click="openQuickCreate('TODO')">添加任务</button>
               </div>
               <transition-group v-else name="cardMove" tag="div" class="list">
                 <template v-for="ri in renderItems('TODO')" :key="ri.key">
@@ -722,6 +1059,7 @@ watch(
                   <div
                     v-else
                     class="card"
+                    :class="{ sub: !!ri.task.parentTaskId }"
                     draggable="true"
                     @click="openTask(ri.task)"
                     @dragstart.stop="onDragStart(ri.task)"
@@ -733,9 +1071,17 @@ watch(
                       <div class="cardTitle">{{ ri.task.title }}</div>
                     </div>
                     <div class="meta">
-                      <span v-if="ri.task.priority" class="chip">{{ ri.task.priority }}</span>
+                      <span v-if="ri.task.priority" class="chip" :class="['prio', `prio-${priorityTone(ri.task.priority)}`]">{{ priorityLabel(ri.task.priority) }}</span>
                       <span v-if="ri.task.assignee" class="chip muted">{{ ri.task.assignee }}</span>
-                      <span v-if="ri.task.dueTime" class="chip muted">Due {{ timeShort(ri.task.dueTime) }}</span>
+                      <span v-if="ri.task.dueTime" class="chip muted">截止 {{ timeShort(ri.task.dueTime) }}</span>
+                      <span
+                        v-if="ri.task.parentTaskId"
+                        class="chip parent"
+                        :title="parentTitle(Number(ri.task.parentTaskId))"
+                      >↳ {{ parentTitle(Number(ri.task.parentTaskId)) }}</span>
+                      <span v-if="!ri.task.parentTaskId && childStat(ri.task.id).total" class="chip prog"
+                        >{{ childStat(ri.task.id).done }}/{{ childStat(ri.task.id).total }}</span
+                      >
                     </div>
                   </div>
                 </template>
@@ -752,7 +1098,7 @@ watch(
               <div class="colTitle">DOING</div>
               <div class="colRight">
                 <span class="pill count">{{ columns.DOING.length }}</span>
-                <button class="iconBtn" type="button" @click="openQuickCreate('DOING')">+</button>
+                <button class="iconBtn" type="button" :disabled="isArchived" @click="openQuickCreate('DOING')">+</button>
               </div>
             </div>
             <div :ref="(el) => setColBodyEl('DOING', el)" class="colBody">
@@ -775,7 +1121,7 @@ watch(
               </div>
               <div v-else-if="!columns.DOING.length" class="emptyCol">
                 <div class="muted">这里还没有任务</div>
-                <button class="btnGhost" type="button" @click="openQuickCreate('DOING')">添加任务</button>
+                <button class="btnGhost" type="button" :disabled="isArchived" @click="openQuickCreate('DOING')">添加任务</button>
               </div>
               <transition-group v-else name="cardMove" tag="div" class="list">
                 <template v-for="ri in renderItems('DOING')" :key="ri.key">
@@ -783,6 +1129,7 @@ watch(
                   <div
                     v-else
                     class="card"
+                    :class="{ sub: !!ri.task.parentTaskId }"
                     draggable="true"
                     @click="openTask(ri.task)"
                     @dragstart.stop="onDragStart(ri.task)"
@@ -794,9 +1141,17 @@ watch(
                       <div class="cardTitle">{{ ri.task.title }}</div>
                     </div>
                     <div class="meta">
-                      <span v-if="ri.task.priority" class="chip">{{ ri.task.priority }}</span>
+                      <span v-if="ri.task.priority" class="chip" :class="['prio', `prio-${priorityTone(ri.task.priority)}`]">{{ priorityLabel(ri.task.priority) }}</span>
                       <span v-if="ri.task.assignee" class="chip muted">{{ ri.task.assignee }}</span>
-                      <span v-if="ri.task.dueTime" class="chip muted">Due {{ timeShort(ri.task.dueTime) }}</span>
+                      <span v-if="ri.task.dueTime" class="chip muted">截止 {{ timeShort(ri.task.dueTime) }}</span>
+                      <span
+                        v-if="ri.task.parentTaskId"
+                        class="chip parent"
+                        :title="parentTitle(Number(ri.task.parentTaskId))"
+                      >↳ {{ parentTitle(Number(ri.task.parentTaskId)) }}</span>
+                      <span v-if="!ri.task.parentTaskId && childStat(ri.task.id).total" class="chip prog"
+                        >{{ childStat(ri.task.id).done }}/{{ childStat(ri.task.id).total }}</span
+                      >
                     </div>
                   </div>
                 </template>
@@ -813,7 +1168,7 @@ watch(
               <div class="colTitle">DONE</div>
               <div class="colRight">
                 <span class="pill count">{{ columns.DONE.length }}</span>
-                <button class="iconBtn" type="button" @click="openQuickCreate('DONE')">+</button>
+                <button class="iconBtn" type="button" :disabled="isArchived" @click="openQuickCreate('DONE')">+</button>
               </div>
             </div>
             <div :ref="(el) => setColBodyEl('DONE', el)" class="colBody">
@@ -836,7 +1191,7 @@ watch(
               </div>
               <div v-else-if="!columns.DONE.length" class="emptyCol">
                 <div class="muted">这里还没有任务</div>
-                <button class="btnGhost" type="button" @click="openQuickCreate('DONE')">添加任务</button>
+                <button class="btnGhost" type="button" :disabled="isArchived" @click="openQuickCreate('DONE')">添加任务</button>
               </div>
               <transition-group v-else name="cardMove" tag="div" class="list">
                 <template v-for="ri in renderItems('DONE')" :key="ri.key">
@@ -844,6 +1199,7 @@ watch(
                   <div
                     v-else
                     class="card"
+                    :class="{ sub: !!ri.task.parentTaskId }"
                     draggable="true"
                     @click="openTask(ri.task)"
                     @dragstart.stop="onDragStart(ri.task)"
@@ -855,9 +1211,17 @@ watch(
                       <div class="cardTitle">{{ ri.task.title }}</div>
                     </div>
                     <div class="meta">
-                      <span v-if="ri.task.priority" class="chip">{{ ri.task.priority }}</span>
+                      <span v-if="ri.task.priority" class="chip" :class="['prio', `prio-${priorityTone(ri.task.priority)}`]">{{ priorityLabel(ri.task.priority) }}</span>
                       <span v-if="ri.task.assignee" class="chip muted">{{ ri.task.assignee }}</span>
-                      <span v-if="ri.task.dueTime" class="chip muted">Due {{ timeShort(ri.task.dueTime) }}</span>
+                      <span v-if="ri.task.dueTime" class="chip muted">截止 {{ timeShort(ri.task.dueTime) }}</span>
+                      <span
+                        v-if="ri.task.parentTaskId"
+                        class="chip parent"
+                        :title="parentTitle(Number(ri.task.parentTaskId))"
+                      >↳ {{ parentTitle(Number(ri.task.parentTaskId)) }}</span>
+                      <span v-if="!ri.task.parentTaskId && childStat(ri.task.id).total" class="chip prog"
+                        >{{ childStat(ri.task.id).done }}/{{ childStat(ri.task.id).total }}</span
+                      >
                     </div>
                   </div>
                 </template>
@@ -903,8 +1267,7 @@ watch(
 </template>
 
 <style scoped>
-.lightPage {
-  background: #ffffff;
+.boardPage {
   color: #0f172a;
 }
 
@@ -913,22 +1276,8 @@ watch(
   font-size: 13px;
 }
 
-.head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 6px;
-}
-
-.right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .filters {
-  margin-top: 12px;
+  margin-top: 0;
   display: grid;
   grid-template-columns: 300px 240px 190px 1fr auto;
   gap: 10px;
@@ -996,34 +1345,33 @@ watch(
 .board {
   display: flex;
   gap: 12px;
-  min-width: 1040px;
+  min-width: 0;
+  width: 100%;
 }
 
 .col {
-  --accent-rgb: 20, 184, 166;
+  --col-accent-rgb: var(--accent-rgb);
+  flex: 1 1 0;
+  min-width: 0;
   border-radius: 18px;
   border: 1px solid rgba(15, 23, 42, 0.06);
-  background: rgba(15, 23, 42, 0.02);
+  background: rgba(255, 255, 255, 0.56);
   min-height: 520px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  flex: 0 0 340px;
 }
 
 .col.todo {
-  --accent-rgb: 20, 184, 166;
-  background: rgba(20, 184, 166, 0.045);
+  --col-accent-rgb: var(--accent-rgb);
 }
 
 .col.doing {
-  --accent-rgb: 6, 182, 212;
-  background: rgba(6, 182, 212, 0.045);
+  --col-accent-rgb: var(--accent2-rgb);
 }
 
 .col.done {
-  --accent-rgb: 16, 185, 129;
-  background: rgba(16, 185, 129, 0.045);
+  --col-accent-rgb: var(--accent-rgb);
 }
 
 .colHead {
@@ -1031,7 +1379,7 @@ watch(
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-bottom: 1px solid rgba(var(--col-accent-rgb), 0.12);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0.50) 100%);
 }
 
@@ -1125,7 +1473,7 @@ watch(
   height: 34px;
   padding: 0 12px;
   border-radius: 12px;
-  background: rgba(20, 184, 166, 0.92);
+  background: rgba(var(--accent-rgb), 0.92);
   color: rgba(255, 255, 255, 0.96);
   font-weight: 900;
 }
@@ -1241,6 +1589,12 @@ watch(
   box-shadow: inset 0 1px 0 rgba(var(--accent-rgb), 0.05);
 }
 
+.card.sub {
+  background: rgba(248, 250, 252, 0.92);
+  border-color: rgba(var(--accent-rgb), 0.16);
+  box-shadow: inset 3px 0 0 rgba(var(--accent-rgb), 0.26), inset 0 1px 0 rgba(var(--accent-rgb), 0.05);
+}
+
 .card:hover {
   transform: translateY(-1px);
   box-shadow: 0 14px 40px rgba(2, 6, 23, 0.10);
@@ -1298,6 +1652,58 @@ watch(
   font-weight: 650;
 }
 
+.chip.prio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip.prio::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+.chip.prio-high {
+  padding: 3px 9px 3px 7px;
+  border-color: rgba(var(--accent-rgb), 0.22);
+  background: rgba(var(--accent-rgb), 0.10);
+  color: rgba(var(--accent-rgb), 1);
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.05);
+}
+.chip.prio-medium {
+  padding: 3px 9px 3px 7px;
+  border-color: rgba(15, 23, 42, 0.10);
+  background: rgba(15, 23, 42, 0.04);
+  color: rgba(71, 85, 105, 0.95);
+  font-weight: 700;
+}
+.chip.prio-low {
+  padding: 3px 9px 3px 7px;
+  border-color: rgba(15, 23, 42, 0.08);
+  background: transparent;
+  color: rgba(100, 116, 139, 0.85);
+  font-weight: 600;
+}
+
+.chip.parent {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(15, 23, 42, 0.72);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.chip.prog {
+  border-color: rgba(var(--accent-rgb), 0.22);
+  background: rgba(var(--accent-rgb), 0.10);
+  color: rgba(15, 23, 42, 0.78);
+  font-weight: 750;
+}
+
 .cardMove-move {
   transition: transform 160ms ease;
 }
@@ -1314,6 +1720,330 @@ watch(
   }
   .colBody {
     max-height: none;
+  }
+}
+
+/* ─── 数据窗（融合统计） ─── */
+.statBar {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.52) 100%);
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.05);
+}
+
+.kpis {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.kpi {
+  min-width: 84px;
+  padding: 0 18px;
+  border-left: 1px solid rgba(15, 23, 42, 0.06);
+}
+.kpi:first-child {
+  border-left: none;
+  padding-left: 0;
+}
+
+.kpiNum {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: rgba(15, 23, 42, 0.88);
+  font-variant-numeric: tabular-nums;
+}
+.kpiNum.warn {
+  color: rgba(220, 60, 60, 0.92);
+}
+
+.kpiLabel {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(100, 116, 139, 0.9);
+}
+
+.rate {
+  min-width: 150px;
+  margin-left: 18px;
+  padding-left: 18px;
+  border-left: 1px solid rgba(15, 23, 42, 0.06);
+}
+.rateTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.rateLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(100, 116, 139, 0.9);
+}
+.rateVal {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(var(--accent-rgb), 0.95);
+  font-variant-numeric: tabular-nums;
+}
+.rateTrack {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+.rateFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.72), rgba(var(--accent-rgb), 1));
+  transition: width 360ms ease;
+}
+
+.winToggles {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.winCap {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(100, 116, 139, 0.85);
+  margin-right: 2px;
+}
+.winBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(15, 23, 42, 0.62);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+.winBtn:hover {
+  border-color: rgba(var(--accent-rgb), 0.28);
+  color: rgba(15, 23, 42, 0.82);
+}
+.winBtn.on {
+  border-color: rgba(var(--accent-rgb), 0.28);
+  background: rgba(var(--accent-rgb), 0.10);
+  color: rgba(var(--accent-rgb), 1);
+}
+
+.winGrid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.winCard {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.05);
+  padding: 14px 16px 16px;
+}
+
+.winHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.winTitle {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.86);
+  border-left: 3px solid rgba(var(--accent-rgb), 0.85);
+  padding-left: 9px;
+  line-height: 1.2;
+}
+.winSub {
+  font-size: 11px;
+}
+.winClose {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: rgba(100, 116, 139, 0.8);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+.winClose:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: rgba(15, 23, 42, 0.8);
+}
+
+.winEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 12px 22px;
+  text-align: center;
+}
+.winEmpty.ok {
+  flex-direction: row;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px 12px;
+}
+.winEmpty p {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(100, 116, 139, 0.9);
+}
+.okDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(16, 163, 127, 0.85);
+  box-shadow: 0 0 0 4px rgba(16, 163, 127, 0.10);
+  margin-top: 1px;
+}
+
+.memList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.memRow {
+  display: grid;
+  grid-template-columns: 26px 96px 1fr 56px;
+  gap: 10px;
+  align-items: center;
+}
+.memAvatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.06);
+  color: rgba(15, 23, 42, 0.62);
+  font-size: 11px;
+  font-weight: 700;
+}
+.memName {
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.memBar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+.memBar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.62), rgba(var(--accent-rgb), 0.95));
+  transition: width 360ms ease;
+}
+.memNum {
+  font-size: 11.5px;
+  font-weight: 750;
+  color: rgba(100, 116, 139, 0.95);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.riskList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.riskItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+.riskItem:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+.riskDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.6);
+}
+.riskDot.warn {
+  background: rgba(220, 60, 60, 0.75);
+}
+.riskTitle {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.riskDays {
+  flex: none;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-color: rgba(220, 60, 60, 0.18);
+  background: rgba(220, 60, 60, 0.06);
+  color: rgba(185, 28, 28, 0.85);
+}
+.riskHigh {
+  flex: none;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-color: rgba(var(--accent-rgb), 0.20);
+  background: rgba(var(--accent-rgb), 0.07);
+  color: rgba(var(--accent-rgb), 0.95);
+}
+
+@media (max-width: 900px) {
+  .statBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .rate {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+  }
+  .winGrid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

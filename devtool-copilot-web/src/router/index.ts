@@ -11,14 +11,12 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/register',
     name: 'register',
-    component: () => import('../views/RegisterView.vue'),
-    meta: { layout: 'blank' }
+    redirect: (to) => ({ name: 'login', query: { ...to.query, auth: 'register' } })
   },
   {
     path: '/forgot-password',
     name: 'forgot-password',
-    component: () => import('../views/ForgotPasswordView.vue'),
-    meta: { layout: 'blank' }
+    redirect: (to) => ({ name: 'login', query: { ...to.query, auth: 'forgot' } })
   },
   {
     path: '/reset-password',
@@ -28,13 +26,11 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    redirect: '/dashboard'
+    redirect: '/board'
   },
   {
     path: '/dashboard',
-    name: 'dashboard',
-    component: () => import('../views/DashboardAnalyticsView.vue'),
-    meta: { requiresAuth: true, layout: 'app' }
+    redirect: '/board'
   },
   {
     path: '/workspace',
@@ -43,9 +39,27 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, layout: 'app' }
   },
   {
+    path: '/collab',
+    name: 'collab-center',
+    component: () => import('../views/CollaborationCenterView.vue'),
+    meta: { requiresAuth: true, layout: 'app' }
+  },
+  {
+    path: '/chat',
+    name: 'chat',
+    component: () => import('../views/ChatView.vue'),
+    meta: { requiresAuth: true, layout: 'app' }
+  },
+  {
     path: '/board',
     name: 'board',
     component: () => import('../views/BoardView.vue'),
+    meta: { requiresAuth: true, layout: 'app' }
+  },
+  {
+    path: '/search',
+    name: 'task-search',
+    component: () => import('../views/TaskSearchView.vue'),
     meta: { requiresAuth: true, layout: 'app' }
   },
   {
@@ -91,9 +105,33 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, layout: 'app' }
   },
   {
+    path: '/projects/:id/pulse',
+    name: 'project-pulse',
+    component: () => import('../views/ProjectPulseView.vue'),
+    meta: { requiresAuth: true, layout: 'app' }
+  },
+  {
     path: '/projects/:projectId/tasks/:taskId',
     name: 'task-detail',
     component: () => import('../views/TaskDetailView.vue'),
+    meta: { requiresAuth: true, layout: 'app' }
+  },
+  {
+    path: '/lifecycle/:taskId',
+    name: 'task-lifecycle',
+    component: () => import('../views/TaskLifecycleView.vue'),
+    meta: { requiresAuth: true, layout: 'app' }
+  },
+  {
+    path: '/lifecycle',
+    name: 'lifecycle-center',
+    component: () => import('../views/LifecycleCenterView.vue'),
+    meta: { requiresAuth: true, layout: 'app' }
+  },
+  {
+    path: '/projects/:projectId/releases/:releaseId',
+    name: 'release-detail',
+    component: () => import('../views/ReleaseDetailView.vue'),
     meta: { requiresAuth: true, layout: 'app' }
   },
   {
@@ -127,6 +165,12 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'blank' }
   },
   {
+    path: '/team-invite',
+    name: 'team-invite',
+    component: () => import('../views/TeamInviteView.vue'),
+    meta: { requiresAuth: true, layout: 'blank' }
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('../views/NotFoundView.vue'),
@@ -144,6 +188,6 @@ router.beforeEach((to) => {
   const auth = useAuthStore()
   if (!auth.isAuthed) return { name: 'login', query: { redirect: to.fullPath } }
   const requiresRole = to.meta.requiresRole ? String(to.meta.requiresRole) : null
-  if (requiresRole && auth.role !== requiresRole) return { name: 'dashboard' }
+  if (requiresRole && auth.role !== requiresRole) return { name: 'board' }
   return true
 })

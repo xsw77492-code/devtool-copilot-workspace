@@ -6,12 +6,17 @@ import com.devtoolcopilot.project.entity.Project;
 import com.devtoolcopilot.project.entity.ProjectMemberRole;
 import com.devtoolcopilot.project.mapper.ProjectMapper;
 import com.devtoolcopilot.project.service.ProjectCollabService;
+import com.devtoolcopilot.project.service.ProjectService;
 import com.devtoolcopilot.task.comment.dto.TaskCommentCreateRequest;
 import com.devtoolcopilot.task.comment.dto.TaskCommentDTO;
 import com.devtoolcopilot.task.comment.service.TaskCommentService;
 import com.devtoolcopilot.task.dto.TaskBatchStatusRequest;
+import com.devtoolcopilot.task.dto.TaskBatchStatusResult;
 import com.devtoolcopilot.task.dto.TaskBatchUpdateRequest;
+import com.devtoolcopilot.task.dto.LifecycleCenterData;
+import com.devtoolcopilot.task.dto.ProjectPulse;
 import com.devtoolcopilot.task.dto.TaskCreateRequest;
+import com.devtoolcopilot.task.dto.PulseData;
 import com.devtoolcopilot.task.dto.TaskDetailUpdateRequest;
 import com.devtoolcopilot.task.dto.TaskNoteCreateRequest;
 import com.devtoolcopilot.task.dto.TaskUpdateRequest;
@@ -29,7 +34,10 @@ import com.devtoolcopilot.task.view.entity.TaskBoardView;
 import com.devtoolcopilot.task.view.service.TaskBoardViewService;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/task")
@@ -42,6 +50,7 @@ public class TaskController {
     private final TaskBoardViewService taskBoardViewService;
     private final TaskTemplateService taskTemplateService;
     private final TaskFollowService taskFollowService;
+    private final ProjectService projectService;
 
     public TaskController(TaskService taskService,
                           TaskTimelineService timelineService,
@@ -50,7 +59,8 @@ public class TaskController {
                           TaskCommentService taskCommentService,
                           TaskBoardViewService taskBoardViewService,
                           TaskTemplateService taskTemplateService,
-                          TaskFollowService taskFollowService) {
+                          TaskFollowService taskFollowService,
+                          ProjectService projectService) {
         this.taskService = taskService;
         this.timelineService = timelineService;
         this.projectCollabService = projectCollabService;
@@ -59,6 +69,7 @@ public class TaskController {
         this.taskBoardViewService = taskBoardViewService;
         this.taskTemplateService = taskTemplateService;
         this.taskFollowService = taskFollowService;
+        this.projectService = projectService;
     }
 
     @PostMapping
@@ -152,6 +163,58 @@ public class TaskController {
                 return R.fail(403, "无权限或项目不存在");
             }
             return R.fail(400, "查询任务失败");
+        }
+    }
+
+    /** 项目节奏洞察数据源：项目全量任务 + 状态事件流（创建 + 状态变更），供前端做生命周期分析 */
+    @GetMapping("/pulse")
+    public R<PulseData> pulse(@RequestParam Long projectId) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
+            return R.fail(401, "未登录");
+        }
+        try {
+            PulseData data = new PulseData();
+            data.setTasks(taskService.listByProjectId(userId, projectId));
+            data.setEvents(timelineService.listStatusEventsByProject(projectId));
+            return R.ok(data);
+        } catch (IllegalArgumentException e) {
+            return R.fail(403, "无权限或项目不存在");
+        }
+    }
+
+    /** 生命周期中心聚合：一次返回全部项目（未归档）的脉冲数据，替代前端逐项目轮询 */
+    @GetMapping("/lifecycle/center")
+    public R<LifecycleCenterData> lifecycleCenter() {
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
+            return R.fail(401, "未登录");
+        }
+        try {
+            List<Project> projects = projectService.listByUserId(userId, false);
+            List<Long> projectIds = projects.stream().map(Project::getId).toList();
+
+            List<Task> tasks = taskService.listByProjectIds(userId, projectIds);
+            List<TaskTimeline> events = timelineService.listStatusEventsByProjectIds(projectIds);
+
+            Map<Long, List<Task>> tasksByProject = tasks.stream().collect(Collectors.groupingBy(Task::getProjectId));
+            Map<Long, List<TaskTimeline>> eventsByProject = events.stream().collect(Collectors.groupingBy(TaskTimeline::getProjectId));
+
+            List<ProjectPulse> pulses = new ArrayList<>();
+            for (Project p : projects) {
+                ProjectPulse pp = new ProjectPulse();
+                pp.setProjectId(p.getId());
+                pp.setTasks(tasksByProject.getOrDefault(p.getId(), List.of()));
+                pp.setEvents(eventsByProject.getOrDefault(p.getId(), List.of()));
+                pulses.add(pp);
+            }
+
+            LifecycleCenterData data = new LifecycleCenterData();
+            data.setProjects(projects);
+            data.setPulses(pulses);
+            return R.ok(data);
+        } catch (IllegalArgumentException e) {
+            return R.fail(403, "无权限");
         }
     }
 
@@ -373,6 +436,26 @@ public class TaskController {
         try {
             int ok = taskService.batchUpdateStatus(userId, req == null ? null : req.getTaskIds(), req == null ? null : req.getStatus(), req == null ? null : req.getForceDone());
             return R.ok(ok);
+        } catch (IllegalArgumentException e) {
+            if ("TASK_IDS_REQUIRED".equals(e.getMessage())) return R.fail(400, "taskIds不能为空");
+            if ("STATUS_REQUIRED".equals(e.getMessage())) return R.fail(400, "status不能为空");
+            if ("PROJECT_NOT_FOUND_OR_FORBIDDEN".equals(e.getMessage())) return R.fail(403, "无权限或项目不存在");
+            return R.fail(400, "批量更新失败");
+        }
+    }
+
+    @PutMapping("/batch/status/detail")
+    public R<TaskBatchStatusResult> batchStatusDetail(@RequestBody TaskBatchStatusRequest req) {
+        Long userId = UserContext.getUserId();
+        if (userId == null) return R.fail(401, "未登录");
+        try {
+            TaskBatchStatusResult res = taskService.batchUpdateStatusDetail(
+                    userId,
+                    req == null ? null : req.getTaskIds(),
+                    req == null ? null : req.getStatus(),
+                    req == null ? null : req.getForceDone()
+            );
+            return R.ok(res);
         } catch (IllegalArgumentException e) {
             if ("TASK_IDS_REQUIRED".equals(e.getMessage())) return R.fail(400, "taskIds不能为空");
             if ("STATUS_REQUIRED".equals(e.getMessage())) return R.fail(400, "status不能为空");

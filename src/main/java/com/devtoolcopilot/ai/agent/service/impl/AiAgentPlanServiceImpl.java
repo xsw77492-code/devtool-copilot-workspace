@@ -58,19 +58,11 @@ public class AiAgentPlanServiceImpl implements AiAgentPlanService {
         String userPrompt = buildUserPrompt(req, sources);
         String raw = deepSeekClient.chat(systemPrompt, userPrompt);
 
-        String json = extractJson(raw);
-        if (json == null || json.isBlank()) {
-            throw new IllegalStateException("AGENT_EMPTY_JSON");
-        }
-        try {
-            AiAgentPlanResponseDTO dto = objectMapper.readValue(json, AiAgentPlanResponseDTO.class);
-            if (dto.getTasks() == null) dto.setTasks(List.of());
-            dto.setSources(sources);
-            normalize(dto);
-            return dto;
-        } catch (Exception e) {
-            throw new IllegalStateException("AGENT_JSON_INVALID");
-        }
+        AiAgentPlanResponseDTO dto = parseJsonOrRepair(raw, AiAgentPlanResponseDTO.class);
+        if (dto.getTasks() == null) dto.setTasks(List.of());
+        dto.setSources(sources);
+        normalize(dto);
+        return dto;
     }
 
     private List<AiAgentSourceDTO> loadTaskSources(Long projectId) {
@@ -134,6 +126,10 @@ public class AiAgentPlanServiceImpl implements AiAgentPlanService {
     private String buildSystemPrompt() {
         return """
                 你是 DevTool Copilot 内置的 AI Agent（项目经理 + Tech Lead）。目标：把用户的需求变成可执行的任务闭环。
+                用户输入可能不完整、不专业。你需要基于上下文做合理补全，但不要编造外部事实。
+                信息不完整时：
+                - 把关键假设写进 description（用“假设：”开头）
+                - 把关键待确认点写进 checklist 的第一条（用“待确认：”开头）
                 只输出严格 JSON，不要输出 Markdown、不要输出解释文字、不要加代码块标记。
                 JSON Schema:
                 {
@@ -141,9 +137,9 @@ public class AiAgentPlanServiceImpl implements AiAgentPlanService {
                   "tasks": [
                     {
                       "title": "任务标题(<=40字)",
-                      "description": "任务说明(<=200字，含关键点/边界)",
+                      "description": "任务说明(<=320字，含关键点/边界/实现提示/风险；必要时写“假设：...”)",
                       "priority": "HIGH|MEDIUM|LOW",
-                      "checklist": ["验收点1", "验收点2"],
+                      "checklist": ["验收点1", "验收点2（必要时第一条为“待确认：...”）"],
                       "deliverables": [{"type":"LINK|DOC|PR","title":"交付物标题","url":"","content":""}],
                       "sources": ["T1","C2","D1"]
                     }
@@ -187,6 +183,25 @@ public class AiAgentPlanServiceImpl implements AiAgentPlanService {
         int end = s.lastIndexOf("}");
         if (idx >= 0 && end > idx) return s.substring(idx, end + 1).trim();
         return null;
+    }
+
+    private <T> T parseJsonOrRepair(String raw, Class<T> clazz) {
+        String json = extractJson(raw);
+        if (json != null && !json.isBlank()) {
+            try {
+                return objectMapper.readValue(json, clazz);
+            } catch (Exception ignored) {
+            }
+        }
+        String fixed = deepSeekClient.chat("""
+                你是 JSON 修复器。只输出严格 JSON，不要输出解释文字。""", raw == null ? "" : raw);
+        String fixedJson = extractJson(fixed);
+        if (fixedJson == null || fixedJson.isBlank()) throw new IllegalStateException("AGENT_JSON_INVALID");
+        try {
+            return objectMapper.readValue(fixedJson, clazz);
+        } catch (Exception e) {
+            throw new IllegalStateException("AGENT_JSON_INVALID");
+        }
     }
 
     private String snippet(String text, int max) {

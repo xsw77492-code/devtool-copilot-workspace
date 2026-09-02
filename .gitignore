@@ -3,6 +3,8 @@ target/
 **/target/
 devtool-copilot-web/dist/
 **/dist/
+.vite/
+**/.vite/
 
 ## ===== Dependencies =====
 devtool-copilot-web/node_modules/
@@ -25,6 +27,9 @@ data/
 .DS_Store
 Thumbs.db
 
+## ===== WorkBuddy workspace data =====
+.workbuddy/
+
 ## ===== Maven local cache copy =====
 .m2repo/
 
@@ -35,3 +40,23 @@ Thumbs.db
 *.cer
 *.p12
 *.jks
+
+## ===== Local dev / personal files (keep locally, not in repo) =====
+resume/
+STARTUP.md
+启动指南.md
+team-collab-commercial-plan.md
+start-backend.bat
+start-dev.bat
+start-frontend.bat
+restart-backend.bat
+
+## ===== Debug / backup / temp =====
+recovery/
+recovery2/
+.dbg/
+.playwright-cli/
+output/
+META-INF/
+debug-*.md
+debug-*.js

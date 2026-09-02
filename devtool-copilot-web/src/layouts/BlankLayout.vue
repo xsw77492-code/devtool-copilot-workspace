@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NConfigProvider, NMessageProvider } from 'naive-ui'
 import { buildThemeOverrides } from '../styles/theme'
+import { usePreferenceStore } from '../stores/preference'
 
-const themeOverrides = buildThemeOverrides('#14b8a6')
+const pref = usePreferenceStore()
+const themeOverrides = computed(() => buildThemeOverrides(pref.accent))
 </script>
 
 <template>

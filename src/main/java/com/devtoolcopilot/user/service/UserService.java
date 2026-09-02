@@ -2,10 +2,13 @@ package com.devtoolcopilot.user.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.devtoolcopilot.user.dto.UserLoginResponse;
+import com.devtoolcopilot.user.dto.UserMeResponse;
 import com.devtoolcopilot.user.entity.User;
 
 public interface UserService extends IService<User> {
     Long register(String username, String email, String rawPassword, String emailVerifyToken);
+
+    UserMeResponse me(Long userId);
 
     UserLoginResponse login(String username, String rawPassword, String ip, String userAgent, String deviceName);
 

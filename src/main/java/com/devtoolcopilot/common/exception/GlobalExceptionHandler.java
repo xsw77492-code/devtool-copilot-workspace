@@ -10,8 +10,10 @@ import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.BindException;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     @ExceptionHandler(ApiException.class)
@@ -52,6 +54,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public R<Void> handleException(Exception e, HttpServletResponse response) {
+        log.error("未处理异常: {}", e.toString(), e);
         response.setStatus(500);
         return R.fail(500, "服务器错误");
     }

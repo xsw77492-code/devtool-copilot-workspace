@@ -22,6 +22,8 @@ export interface Task {
   updatedAt?: string
   createdAt?: number
   createTime?: string
+  startedTime?: string
+  doneTime?: string
 }
 
 export interface TaskTimelineItem {
@@ -57,6 +59,17 @@ export interface TaskBoardView {
   filtersJson: string
   createTime?: string
   updateTime?: string
+}
+
+export interface TaskBatchStatusFailure {
+  taskId: number
+  code: number
+  message: string
+}
+
+export interface TaskBatchStatusResult {
+  ok: number
+  failed: TaskBatchStatusFailure[]
 }
 
 export interface TaskTemplate {
@@ -101,6 +114,34 @@ export interface TaskChecklistItem {
   updateTime?: string | null
 }
 
+export interface PulseEvent {
+  id: number
+  userId: number
+  projectId: number
+  taskId: number
+  type: 'CREATED' | 'STATUS_CHANGED' | string
+  title?: string
+  detail?: string
+  createTime?: string
+  createdAt?: number
+}
+
+export interface PulseData {
+  tasks: Task[]
+  events: PulseEvent[]
+}
+
+export interface ProjectPulseData {
+  projectId: number
+  tasks: Task[]
+  events: PulseEvent[]
+}
+
+export interface LifecycleCenterData {
+  projects: Array<{ id: number; name: string; archived?: number | null }>
+  pulses: ProjectPulseData[]
+}
+
 export interface WorkspaceExportResponse {
   filename: string
   content: string
@@ -109,6 +150,29 @@ export interface WorkspaceExportResponse {
 export interface WorkspaceWeeklyReportResponse {
   title: string
   content: string
+}
+
+export interface TaskSearchItem {
+  id: number
+  projectId: number
+  projectArchived?: number | null
+  projectName: string
+  title: string
+  status: TaskStatus
+  priority?: string | null
+  tags?: string | null
+  assignee?: string | null
+  assigneeId?: number | null
+  dueTime?: string | null
+  milestoneId?: number | null
+  milestoneName?: string | null
+  updatedAt?: string | null
+  createTime?: string | null
+}
+
+export interface TaskSearchResponse {
+  total: number
+  items: TaskSearchItem[]
 }
 
 export interface WorkspaceMyWorkItem {
@@ -268,9 +332,64 @@ export const taskApi = {
     return apiGet<WorkspaceMyWorkItem[]>('/api/task/workspace/my-work', { limit })
   },
 
+  search(payload: {
+    q?: string
+    projectId?: number | null
+    includeArchived?: boolean
+    statuses?: TaskStatus[]
+    assigneeId?: number | null
+    milestoneId?: number | null
+    tags?: string[]
+    updatedFrom?: number | null
+    updatedTo?: number | null
+    page?: number
+    pageSize?: number
+  }): Promise<TaskSearchResponse> {
+    return apiGet<TaskSearchResponse>('/api/task/search', {
+      q: payload.q?.trim() || undefined,
+      projectId: payload.projectId ?? undefined,
+      includeArchived: payload.includeArchived ?? undefined,
+      status: payload.statuses?.length ? payload.statuses.join(',') : undefined,
+      assigneeId: payload.assigneeId ?? undefined,
+      milestoneId: payload.milestoneId ?? undefined,
+      tags: payload.tags?.length ? payload.tags.join(',') : undefined,
+      updatedFrom: payload.updatedFrom ?? undefined,
+      updatedTo: payload.updatedTo ?? undefined,
+      page: payload.page ?? undefined,
+      pageSize: payload.pageSize ?? undefined
+    })
+  },
+
   async timeline(taskId: number): Promise<TaskTimelineItem[]> {
     const list = await apiGet<TaskTimelineItem[]>(`/api/task/${taskId}/timeline`)
     return list.map((e) => ({ ...e, createdAt: e.createTime ? Date.parse(e.createTime) : undefined }))
+  },
+
+  async pulse(projectId: number): Promise<PulseData> {
+    const data = await apiGet<PulseData>('/api/task/pulse', { projectId })
+    data.tasks = data.tasks
+      .map((t) => ({ ...t, createdAt: t.createTime ? Date.parse(t.createTime) : undefined }))
+      .slice()
+      .sort((a, b) => b.id - a.id)
+    data.events = data.events
+      .map((e) => ({ ...e, createdAt: e.createTime ? Date.parse(e.createTime) : undefined }))
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+    return data
+  },
+
+  /** 生命周期中心聚合：一次返回全部未归档项目的脉冲数据，替代逐项目轮询 */
+  async lifecycleCenter(): Promise<LifecycleCenterData> {
+    const data = await apiGet<LifecycleCenterData>('/api/task/lifecycle/center')
+    for (const pp of data.pulses) {
+      pp.tasks = pp.tasks
+        .map((t) => ({ ...t, createdAt: t.createTime ? Date.parse(t.createTime) : undefined }))
+        .slice()
+        .sort((a, b) => b.id - a.id)
+      pp.events = pp.events
+        .map((e) => ({ ...e, createdAt: e.createTime ? Date.parse(e.createTime) : undefined }))
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+    }
+    return data
   },
 
   async addNote(taskId: number, content: string): Promise<number> {
@@ -332,8 +451,12 @@ export const taskApi = {
     return apiGet<number[]>('/api/task/participated-ids', { projectId })
   },
 
-  batchUpdateStatus(taskIds: number[], status: TaskStatus): Promise<number> {
-    return apiPut<number>('/api/task/batch/status', { taskIds, status })
+  batchUpdateStatus(taskIds: number[], status: TaskStatus, opts?: { forceDone?: boolean | null }): Promise<number> {
+    return apiPut<number>('/api/task/batch/status', { taskIds, status, forceDone: opts?.forceDone ?? undefined })
+  },
+
+  batchUpdateStatusDetail(taskIds: number[], status: TaskStatus, opts?: { forceDone?: boolean | null }): Promise<TaskBatchStatusResult> {
+    return apiPut<TaskBatchStatusResult>('/api/task/batch/status/detail', { taskIds, status, forceDone: opts?.forceDone ?? undefined })
   },
 
   batchUpdateFields(payload: {

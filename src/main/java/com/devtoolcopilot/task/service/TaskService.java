@@ -1,6 +1,7 @@
 package com.devtoolcopilot.task.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.devtoolcopilot.task.dto.TaskBatchStatusResult;
 import com.devtoolcopilot.task.entity.Task;
 import com.devtoolcopilot.task.entity.TaskStatus;
 
@@ -26,6 +27,8 @@ public interface TaskService extends IService<Task> {
 
     int batchUpdateStatus(Long userId, List<Long> taskIds, TaskStatus status, Boolean forceDone);
 
+    TaskBatchStatusResult batchUpdateStatusDetail(Long userId, List<Long> taskIds, TaskStatus status, Boolean forceDone);
+
     int batchUpdateFields(Long userId,
                           List<Long> taskIds,
                           String priority,
@@ -35,6 +38,8 @@ public interface TaskService extends IService<Task> {
                           Boolean clearDueTime);
 
     List<Task> listByProjectId(Long userId, Long projectId);
+
+    List<Task> listByProjectIds(Long userId, List<Long> projectIds);
 
     List<Long> participatedTaskIds(Long userId, Long projectId);
 

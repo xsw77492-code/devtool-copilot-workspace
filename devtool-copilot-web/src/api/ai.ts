@@ -21,8 +21,31 @@ export interface AiChatHistoryItem {
   projectId?: number | null
   prompt: string
   response: string
+  type?: string
   createTime?: string
   createdAt?: number
+}
+
+export interface AiUsageDaily {
+  date: string
+  calls: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface AiUsageTypeRow {
+  type: string
+  calls: number
+  totalTokens: number
+}
+
+export interface AiUsageQuota {
+  monthlyUsedTokens: number
+  monthlyQuota: number
+  todayCalls: number
+  dailyCallLimit: number
+  monthlyExceeded: boolean
 }
 
 export type AiRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
@@ -102,10 +125,25 @@ async function ssePostWithFallback(
   let lastErr: any = null
   for (const p of paths) {
     try {
-      const resp = await fetch(p, { method: 'POST', headers, body: JSON.stringify(body) })
-      if (!resp.ok || !resp.body) throw new Error(`请求失败(${resp.status})`)
+      // 连接阶段：网络错误自动重试一次（指数退避 1s），HTTP 错误不重试
+      let resp: Response | null = null
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          resp = await fetch(p, { method: 'POST', headers, body: JSON.stringify(body) })
+          if (!resp.ok || !resp.body) throw new Error(await readResponseError(resp))
+          break
+        } catch (e: any) {
+          const msg = String(e?.message || '')
+          const networkErr = msg.includes('Failed to fetch') || msg.includes('NetworkError') || e instanceof TypeError
+          if (attempt === 0 && networkErr) {
+            await new Promise((r) => setTimeout(r, 1000))
+            continue
+          }
+          throw e
+        }
+      }
 
-      const reader = resp.body.getReader()
+      const reader = resp!.body!.getReader()
       const decoder = new TextDecoder('utf-8')
       let buf = ''
 
@@ -137,7 +175,7 @@ async function ssePostWithFallback(
       }
       return
     } catch (e: any) {
-      lastErr = e
+      lastErr = new Error(normalizeAiErrorMessage(e))
       const msg = String(e?.message || '')
       if (!msg.includes('接口不存在') && !msg.startsWith('请求失败(404)') && !msg.startsWith('请求失败(404')) throw e
     }
@@ -145,14 +183,49 @@ async function ssePostWithFallback(
   throw lastErr || new Error('请求失败')
 }
 
+async function readResponseError(resp: Response): Promise<string> {
+  const base = `请求失败(${resp.status})`
+  try {
+    const raw = (await resp.text()).trim()
+    if (!raw) return base
+    return `${base}：${raw}`
+  } catch {
+    return base
+  }
+}
+
+function normalizeAiErrorMessage(err: any): string {
+  const msg = String(err?.message || '').trim()
+  if (!msg) return 'AI服务调用失败'
+  if (msg === 'Failed to fetch' || /NetworkError/i.test(msg)) {
+    return '无法连接 AI 服务，请检查后端是否启动、网络是否正常，或接口是否被拦截。'
+  }
+  if (/请求失败\(401\)/.test(msg)) {
+    return 'AI 服务鉴权失败，请重新登录后再试。'
+  }
+  if (/请求失败\(403\)/.test(msg)) {
+    return 'AI 服务被拒绝访问，请检查当前账号权限或后端鉴权配置。'
+  }
+  if (/请求失败\(404\)/.test(msg)) {
+    return 'AI 接口不存在，通常是后端未更新到最新版本或接口路径不一致。'
+  }
+  if (/请求失败\(429\)/.test(msg)) {
+    return 'AI 服务当前请求过多，稍后再试。'
+  }
+  if (/请求失败\(5\d{2}\)/.test(msg)) {
+    return `AI 服务暂时异常，服务端返回：${msg}`
+  }
+  return msg
+}
+
 export const aiApi = {
-  async chat(input: { messages: ChatMessageDTO[]; projectId?: number }) {
+  async chat(input: { messages: ChatMessageDTO[]; projectId?: number; type?: string }) {
     const res = await apiPost<{ reply: string }>('/ai/chat', input)
     return res.reply
   },
 
   async chatStream(
-    input: { messages: ChatMessageDTO[]; projectId?: number },
+    input: { messages: ChatMessageDTO[]; projectId?: number; type?: string },
     onDelta: (text: string) => void
   ): Promise<string> {
     const token = localStorage.getItem('dtc_token')
@@ -165,7 +238,7 @@ export const aiApi = {
       body: JSON.stringify(input)
     })
     if (!resp.ok || !resp.body) {
-      throw new Error(`请求失败(${resp.status})`)
+      throw new Error(await readResponseError(resp))
     }
 
     const reader = resp.body.getReader()
@@ -186,7 +259,7 @@ export const aiApi = {
         full += data
         onDelta(data)
       } else if (event === 'error') {
-        throw new Error(data.trim() || 'AI服务调用失败')
+        throw new Error(normalizeAiErrorMessage(new Error(data.trim() || 'AI服务调用失败')))
       }
       return event
     }
@@ -228,7 +301,7 @@ export const aiApi = {
       body: JSON.stringify(input)
     })
     if (!resp.ok || !resp.body) {
-      throw new Error(`请求失败(${resp.status})`)
+      throw new Error(await readResponseError(resp))
     }
 
     const reader = resp.body.getReader()
@@ -249,7 +322,7 @@ export const aiApi = {
         full += data
         onDelta(data)
       } else if (event === 'error') {
-        throw new Error(data.trim() || 'AI服务调用失败')
+        throw new Error(normalizeAiErrorMessage(new Error(data.trim() || 'AI服务调用失败')))
       }
       return event
     }
@@ -291,7 +364,7 @@ export const aiApi = {
       body: JSON.stringify(input)
     })
     if (!resp.ok || !resp.body) {
-      throw new Error(`请求失败(${resp.status})`)
+      throw new Error(await readResponseError(resp))
     }
 
     const reader = resp.body.getReader()
@@ -313,7 +386,7 @@ export const aiApi = {
       } else if (event === 'result') {
         resultJson = data
       } else if (event === 'error') {
-        throw new Error(data.trim() || 'AI服务调用失败')
+        throw new Error(normalizeAiErrorMessage(new Error(data.trim() || 'AI服务调用失败')))
       }
       return event
     }
@@ -340,9 +413,22 @@ export const aiApi = {
     return list.slice().sort((a, b) => (a.order || 0) - (b.order || 0))
   },
 
-  async historyList(input?: { projectId?: number | null; limit?: number }): Promise<AiChatHistoryItem[]> {
+  async usageDaily(days = 7): Promise<AiUsageDaily[]> {
+    return apiGet<AiUsageDaily[]>('/api/ai/usage/daily', { days })
+  },
+
+  async usageTypes(): Promise<AiUsageTypeRow[]> {
+    return apiGet<AiUsageTypeRow[]>('/api/ai/usage/types')
+  },
+
+  async usageQuota(): Promise<AiUsageQuota> {
+    return apiGet<AiUsageQuota>('/api/ai/usage/quota')
+  },
+
+  async historyList(input?: { projectId?: number | null; type?: string; limit?: number }): Promise<AiChatHistoryItem[]> {
     const list = await apiGet<AiChatHistoryItem[]>('/api/ai/history/list', {
       projectId: input?.projectId ?? undefined,
+      type: input?.type ?? undefined,
       limit: input?.limit ?? 100
     })
     return list
@@ -422,10 +508,12 @@ export const aiApi = {
     return plan || { goal: null, tasks: [] }
   },
 
-  async agentApply(input: { projectId: number; plan: AiAgentPlanResponse }): Promise<AiAgentApplyResponse> {
+  async agentApply(input: { projectId: number; plan: AiAgentPlanResponse; milestoneId?: number | null; parentTaskId?: number | null }): Promise<AiAgentApplyResponse> {
     return postWithFallback<AiAgentApplyResponse>(['/ai/agent/apply', '/api/ai/agent/apply'], {
       projectId: input.projectId,
-      plan: input.plan
+      plan: input.plan,
+      milestoneId: input.milestoneId ?? undefined,
+      parentTaskId: input.parentTaskId ?? undefined
     })
   }
 }

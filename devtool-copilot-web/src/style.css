@@ -3,25 +3,69 @@
 @tailwind utilities;
 
 :root {
-  --bg0: #ffffff;
+  --bg0: #eef0f3;
   --bg1: #ffffff;
-  --panel: rgba(255, 255, 255, 0.86);
-  --panel2: rgba(255, 255, 255, 0.74);
-  --stroke: rgba(15, 23, 42, 0.10);
-  --stroke2: rgba(15, 23, 42, 0.06);
-  --text: #0b1220;
-  --muted: rgba(15, 23, 42, 0.62);
-  --muted2: rgba(15, 23, 42, 0.48);
-  --accent: #14b8a6;
-  --accent2: #06b6d4;
-  --shadow: 0 18px 60px rgba(15, 23, 42, 0.14);
-  --radius: 14px;
-  --radius-sm: 10px;
-  --space-1: 6px;
-  --space-2: 10px;
-  --space-3: 14px;
-  --space-4: 18px;
-  --space-5: 24px;
+  --panel: #ffffff;
+  --panel2: #ffffff;
+  --stroke: #e7e9ed;
+  --stroke2: #f0f1f3;
+  --text: #1f2329;
+  --muted: #646a73;
+  --muted2: #8b9199;
+  --accent: #1e40af;
+  --accent2: #1e40af;
+  --accent-rgb: 30, 64, 175;
+  --accent2-rgb: 30, 64, 175;
+  --shadow: 0 4px 14px rgba(31, 35, 41, 0.05);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+
+  /* ── AI 规划弹窗设计令牌（清冷商业风：统一品牌墨蓝，无渐变） ── */
+  --ai-grad-start: #1e40af; /* 品牌墨蓝 */
+  --ai-grad-mid: #1e40af;
+  --ai-grad-end: #1e40af;
+  --ai-grad: #1e40af; /* 纯色，不启用渐变 */
+  --ai-grad-soft: rgba(30, 64, 175, 0.08);
+  --ai-grad-glow: 0 2px 8px rgba(30, 64, 175, 0.18);
+  --ai-ink: #111827;
+  --ai-ink-2: #374151;
+  --ai-muted: #6b7280;
+  --ai-faint: #9ca3af;
+  --ai-line: #e5e7eb;
+  --ai-line-strong: #d1d5db;
+  --ai-surface: #ffffff;
+  --ai-surface-2: #f9fafb;
+  --ai-surface-3: #f3f4f6;
+  --ai-success: #16a34a;
+  --ai-danger: #b91c1c;
+  --ai-warn: #b45309;
+  --ai-modal-shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 12px 32px -8px rgba(17, 24, 39, 0.12);
+  --ai-modal-radius: 14px;
+  --ai-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ai-ease-in: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── 项目工作区 · 清冷商业感令牌 ───────────────── */
+  --brand: #1f2329;        /* 唯一强调色：深 slate 黑 */
+  --brand-hover: #111827;  /* 强调色 hover 深一档 */
+  --brand-soft: rgba(31, 35, 41, 0.06);  /* 极淡黑底（选中/悬浮态） */
+  --brand-soft-2: rgba(31, 35, 41, 0.10);
+  --danger-ink: #b91c1c;   /* 唯一警示色：深酒红（仅逾期等真异常） */
+  --ink: #111827;          /* 主文字 */
+  --ink-2: #374151;        /* 次要文字 */
+  --ink-3: #6b7280;        /* 辅助文字 */
+  --ink-4: #9ca3af;        /* 极淡文字 / 占位 */
+  --line: #e5e7eb;         /* 边框 / 分割线 */
+  --line-strong: #d1d5db;  /* hover 边框 */
+  --surface: #ffffff;      /* 卡片背景 */
+  --surface-2: #f9fafb;    /* hover / 列背景 */
+  --surface-3: #f3f4f6;    /* 极淡背景 */
+  --radius-md: 8px;        /* 卡片圆角 */
+  --radius-sm: 6px;        /* 控件圆角 */
 
   font-synthesis: none;
   text-rendering: geometricPrecision;
@@ -39,18 +83,30 @@ body,
 body {
   margin: 0;
   color: var(--text);
-  background: #ffffff;
+  background: var(--bg0);
   overflow-x: hidden;
+  /* 钉钉式端正字体栈：中文优先「苹方/微软雅黑/思源黑体」，英文 Segoe UI/Inter，端庄稳定 */
   font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI Variable',
-    'Segoe UI',
-    Inter,
     'PingFang SC',
     'Microsoft YaHei',
+    'Hiragino Sans GB',
+    'Source Han Sans SC',
+    'Noto Sans CJK SC',
+    'Segoe UI',
+    'Helvetica Neue',
+    'Inter',
+    Arial,
     sans-serif;
+  font-weight: 400;
+  font-feature-settings: normal;
+  letter-spacing: 0;
+  line-height: 1.45;
+}
+:root {
+  /* 暴露聊天页字体令牌，便于 scoped 样式兜底 */
+  --app-font:
+    'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Source Han Sans SC',
+    'Noto Sans CJK SC', 'Segoe UI', 'Helvetica Neue', Inter, Arial, sans-serif;
 }
 
 * {
@@ -68,13 +124,14 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(15, 23, 42, 0.18);
-  border-radius: 999px;
-  border: 3px solid rgba(255, 255, 255, 0.7);
+  background: #cfd3da;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(15, 23, 42, 0.26);
+  background: #aeb4bd;
 }
 
 a {
@@ -83,11 +140,10 @@ a {
 }
 
 .panel {
-  background: var(--panel2);
+  background: var(--panel);
   border: 1px solid var(--stroke);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
+  box-shadow: none;
 }
 
 .muted {
@@ -95,20 +151,20 @@ a {
 }
 
 .page {
-  max-width: 1120px;
+  max-width: 1440px;
   margin: 0 auto;
 }
 
 .h1 {
-  font-size: 20px;
-  letter-spacing: -0.2px;
+  font-size: 22px;
+  letter-spacing: 0;
   margin: 0;
   font-weight: 650;
 }
 
 .h2 {
   font-size: 13px;
-  letter-spacing: 0.15px;
+  letter-spacing: 0;
   margin: 0;
   font-weight: 620;
 }
@@ -135,6 +191,61 @@ a {
 }
 
 .hover-row:hover {
-  background: rgba(15, 23, 42, 0.03);
-  border-color: rgba(15, 23, 42, 0.10);
+  background: #f7f8fa;
+  border-color: #dfe2e7;
+}
+
+/* ── AI 规划弹窗共用动效 ──────────────────────────── */
+@keyframes ai-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ai-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ai-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ai-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-anim,
+  .ai-anim * {
+    animation: none !important;
+    transition: none !important;
+  }
 }

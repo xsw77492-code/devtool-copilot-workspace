@@ -20,6 +20,8 @@ import { usePreferenceStore } from '../stores/preference'
 
 const route = useRoute()
 const pref = usePreferenceStore()
+const isChat = computed(() => route.name === 'chat')
+const isCollab = computed(() => route.name === 'collab-center')
 const switching = ref(false)
 let switchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -64,18 +66,21 @@ watch(
             <n-layout class="app-shell" has-sider>
               <n-layout-sider
                 collapse-mode="width"
-                :collapsed-width="84"
-                :width="260"
+                :collapsed-width="72"
+                :width="236"
                 class="app-sider"
               >
                 <side-nav />
               </n-layout-sider>
 
-              <n-layout>
+              <n-layout class="app-main">
                 <n-layout-header class="app-header">
                   <top-bar />
                 </n-layout-header>
-                <n-layout-content class="app-content">
+                <n-layout-content
+                  class="app-content"
+                  :class="{ 'chat-content': isChat, 'collab-content': isCollab }"
+                >
                   <div class="view-stage" :class="{ switching }">
                     <router-view v-slot="{ Component, route }">
                       <component :is="Component" :key="viewKey(route)" class="view" />
@@ -94,24 +99,54 @@ watch(
 <style scoped>
 .app-shell {
   height: 100vh;
-  background: transparent;
+  background: var(--bg0);
+}
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .app-sider {
-  background: transparent;
-  border-right: 1px solid var(--stroke);
+  background: #fff;
+  border-right: 1px solid #e7e9ed;
   transition: width 180ms ease, border-color 180ms ease;
 }
 .app-header {
   height: 52px;
   display: flex;
   align-items: center;
-  background: transparent;
+  background: #fff;
+  border-bottom: 1px solid #e7e9ed;
 }
 .app-content {
-  padding: 18px 28px 34px;
+  padding: 24px 28px 32px;
+  background: var(--bg0);
   overflow-y: auto;
   overflow-x: hidden;
   transition: padding 180ms ease;
+}
+.app-content.chat-content {
+  padding: 0;
+  overflow: hidden;
+}
+.app-content.collab-content {
+  padding: 0;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* naive-ui 的 n-layout-scroll-container 默认是 block，header/content 无法 flex 分配高度。
+   协作页需要 content 撑满 100vh-52px，所以只对这个容器启用 flex column */
+.app-main :deep(.n-layout-scroll-container:has(.app-content.collab-content)) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.app-content.collab-content .view-stage,
+.app-content.collab-content .view {
+  height: 100%;
 }
 
 .app-sider :deep(.n-layout-sider-scroll-container) {
@@ -132,7 +167,13 @@ watch(
   width: 100%;
 }
 .view-stage.switching {
-  opacity: 0.975;
-  filter: saturate(0.99);
+  opacity: 1;
+  filter: none;
+}
+
+@media (max-width: 760px) {
+  .app-content {
+    padding: 16px 14px 24px;
+  }
 }
 </style>

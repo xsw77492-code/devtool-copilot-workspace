@@ -25,13 +25,14 @@ public class AiHistoryController {
 
     @GetMapping("/list")
     public R<List<AiChatHistoryDTO>> list(@RequestParam(required = false) Long projectId,
+                                          @RequestParam(required = false) String type,
                                           @RequestParam(required = false) Integer limit) {
         Long userId = UserContext.getUserId();
         if (userId == null) {
             return R.fail(401, "未登录");
         }
         try {
-            return R.ok(historyService.list(userId, projectId, limit));
+            return R.ok(historyService.list(userId, projectId, type, limit));
         } catch (IllegalArgumentException e) {
             return R.fail(400, "请求参数错误");
         }

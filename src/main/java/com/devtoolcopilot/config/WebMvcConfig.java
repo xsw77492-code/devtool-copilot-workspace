@@ -26,7 +26,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/user/password-reset/request",
                         "/api/user/password-reset/confirm",
                         "/api/user/email-verify/request",
-                        "/api/user/email-verify/confirm"
+                        "/api/user/email-verify/confirm",
+                        "/api/user/avatar/**"
                 );
     }
 }

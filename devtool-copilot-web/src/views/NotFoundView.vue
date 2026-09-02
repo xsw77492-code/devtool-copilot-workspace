@@ -11,7 +11,7 @@ const router = useRouter()
       <div class="h1">404</div>
       <div class="muted">页面不存在</div>
       <div class="actions">
-        <n-button text size="small" type="primary" class="pill" @click="router.push({ name: 'dashboard' })">
+        <n-button text size="small" type="primary" class="pill" @click="router.push({ name: 'board' })">
           返回工作台
         </n-button>
         <n-button text size="small" class="pill" @click="router.push({ name: 'login' })">登录</n-button>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { NConfigProvider, dateZhCN, zhCN } from 'naive-ui'
 import AppLayout from './layouts/AppLayout.vue'
 import BlankLayout from './layouts/BlankLayout.vue'
 
@@ -14,5 +15,7 @@ const layout = computed(() => {
 </script>
 
 <template>
-  <component :is="layout" />
+  <n-config-provider :locale="zhCN" :date-locale="dateZhCN">
+    <component :is="layout" />
+  </n-config-provider>
 </template>

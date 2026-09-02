@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --configLoader native --host 127.0.0.1 --port 5174",
     "build": "vue-tsc -b && vite build",
+    "build:fast": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {

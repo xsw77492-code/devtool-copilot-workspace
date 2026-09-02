@@ -61,6 +61,10 @@ export async function apiPut<T>(path: string, body?: unknown) {
   return request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) })
 }
 
+export async function apiPatch<T>(path: string, body?: unknown) {
+  return request<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) })
+}
+
 export async function apiDelete<T>(path: string) {
   return request<T>(path, { method: 'DELETE' })
 }
@@ -111,7 +115,7 @@ async function request<T>(path: string, init: RequestInit, retried?: boolean): P
     // #region debug-point A:http-network-error
     __dtcDbg('A', 'api/http.ts:axios', '[DEBUG] http network error', { path, method }, traceId)
     // #endregion
-    throw new Error('网络错误，请确认后端已启动')
+    throw new Error(`无法连接服务，请确认前端代理已连接到后端（8085）：${path}`)
   }
 
   const t1 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
@@ -184,6 +188,30 @@ async function tryRefresh(path: string, retried?: boolean): Promise<boolean> {
   localStorage.setItem('dtc_refresh_token', res.refreshToken)
   localStorage.setItem('dtc_me', JSON.stringify(res.me))
   return true
+}
+
+/**
+ * 带鉴权的原生 fetch：token 失效时自动走 refreshToken 刷新并重试一次。
+ * 用于图片/文件下载等不能走 axios 的请求（保证聊天图片加载不被 401 打断）。
+ */
+export async function fetchWithAuth(path: string, init?: RequestInit, retried?: boolean): Promise<Response> {
+  const token = localStorage.getItem('dtc_token')
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const resp = await fetch(path, { ...init, headers })
+  if (resp.status === 401 && !retried) {
+    const refreshToken = localStorage.getItem('dtc_refresh_token')
+    if (refreshToken && !path.startsWith('/api/user/refresh')) {
+      const res = await refreshOnce(refreshToken)
+      if (res) {
+        localStorage.setItem('dtc_token', res.accessToken)
+        localStorage.setItem('dtc_refresh_token', res.refreshToken)
+        localStorage.setItem('dtc_me', JSON.stringify(res.me))
+        return fetchWithAuth(path, init, true)
+      }
+    }
+  }
+  return resp
 }
 
 async function refreshOnce(refreshToken: string): Promise<LoginResponse | null> {

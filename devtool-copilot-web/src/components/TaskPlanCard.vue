@@ -96,13 +96,13 @@ const actionLabel = computed(() => {
   white-space: nowrap;
 }
 .prio.high {
-  background: rgba(20, 184, 166, 0.14);
-  border-color: rgba(20, 184, 166, 0.26);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
   color: rgba(250, 250, 250, 0.92);
 }
 .prio.medium {
-  background: rgba(6, 182, 212, 0.12);
-  border-color: rgba(6, 182, 212, 0.22);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.10);
   color: rgba(250, 250, 250, 0.88);
 }
 .prio.low {

@@ -222,17 +222,17 @@ public class MilestoneServiceImpl implements MilestoneService {
                 .orderByAsc(Task::getId)
         );
         StringBuilder sb = new StringBuilder();
-        sb.append("# Release Notes: ").append(safeText(m.getName())).append("\n\n");
-        sb.append("- Date: ").append(LocalDate.now()).append("\n");
-        if (m.getDueTime() != null) sb.append("- Due: ").append(m.getDueTime().toLocalDate()).append("\n");
+        sb.append("# 发版说明：").append(safeText(m.getName())).append("\n\n");
+        sb.append("- 发版日期：").append(LocalDate.now()).append("\n");
+        if (m.getDueTime() != null) sb.append("- 计划交付：").append(m.getDueTime().toLocalDate()).append("\n");
         sb.append("\n");
         String desc = safeText(m.getDescription());
         if (!desc.isBlank()) {
             sb.append(desc).append("\n\n");
         }
-        sb.append("## Completed\n\n");
+        sb.append("## 已完成任务\n\n");
         if (done.isEmpty()) {
-            sb.append("- (No DONE tasks in this milestone)\n");
+            sb.append("- （本里程碑暂无已完成任务）\n");
             return sb.toString();
         }
 
@@ -249,15 +249,15 @@ public class MilestoneServiceImpl implements MilestoneService {
                 if (Objects.equals(d.getTaskId(), t.getId())) ds.add(d);
             }
             if (!ds.isEmpty()) {
-                sb.append("  - Deliverables:\n");
+                sb.append("  - 交付物：\n");
                 for (TaskDeliverable d : ds) {
                     String type = safeText(d.getType());
                     String title = safeText(d.getTitle());
                     String url = safeText(d.getUrl());
                     if (!url.isBlank()) {
-                        sb.append("    - [").append(title).append("](").append(url).append(") (").append(type).append(")\n");
+                        sb.append("    - [").append(title).append("](").append(url).append(")（").append(type).append("）\n");
                     } else {
-                        sb.append("    - ").append(title).append(" (").append(type).append(")\n");
+                        sb.append("    - ").append(title).append("（").append(type).append("）\n");
                     }
                 }
             }

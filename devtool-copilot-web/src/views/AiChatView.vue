@@ -2,16 +2,17 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NDropdown, NForm, NFormItem, NInput, NModal, NSelect, useMessage } from 'naive-ui'
-import { useChatStore } from '../stores/chat'
+import { useAiChatStore } from '../stores/aiChat'
 import MarkdownView from '../components/MarkdownView.vue'
 import { useProjectStore } from '../stores/project'
 import { kbApi } from '../api/kb'
 import { docgenApi, type DocGenSaveTo } from '../api/docgen'
 import AiCodeReviewView from './AiCodeReviewView.vue'
 import AiHistoryView from './AiHistoryView.vue'
+import AiUsageView from './AiUsageView.vue'
 import { uploadAiFile } from '../api/aiFile'
 
-const chat = useChatStore()
+const chat = useAiChatStore()
 const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
@@ -21,8 +22,24 @@ const projectId = ref<number | null>(null)
 const input = ref('')
 const viewport = ref<HTMLDivElement | null>(null)
 const streamCursor = computed(() => (chat.sending ? 'typing' : ''))
+const planPreviewOpen = ref(false)
+const currentPlan = computed(() => chat.lastAgentPlan)
+const currentPlanTasks = computed(() => (Array.isArray(currentPlan.value?.tasks) ? currentPlan.value!.tasks : []))
+const currentPlanGoal = computed(() => String(currentPlan.value?.goal || '').trim())
+const currentPlanTop = computed(() => currentPlanTasks.value.slice(0, 5))
+const currentPlanPreview = computed(() => currentPlanTasks.value.slice(0, 2))
+const currentPlanHighCount = computed(() =>
+  currentPlanTasks.value.filter((task) => String(task?.priority || '').trim().toUpperCase() === 'HIGH').length,
+)
+const legacyPlanSummaryPattern = /<details>\s*<summary>\s*查看完整任务清单\s*<\/summary>[\s\S]*?<\/details>/gi
 
-type AiTab = 'chat' | 'review' | 'history'
+type ThinkingCard = {
+  state: 'thinking' | 'done' | 'error'
+  steps: Array<{ state: string; label: string }>
+  reason: string
+}
+
+type AiTab = 'chat' | 'review' | 'history' | 'usage'
 const tab = ref<AiTab>('chat')
 
 const docOpen = ref(false)
@@ -174,6 +191,41 @@ async function send() {
   }
   pendingAttachments.value = []
   await chat.send(text, projectId.value, uploaded)
+}
+
+function openPlanPreview() {
+  if (!currentPlan.value) return
+  planPreviewOpen.value = true
+}
+
+function sanitizeAssistantContent(content: string) {
+  return String(content || '').replace(legacyPlanSummaryPattern, '').trim()
+}
+
+function parseAssistantSections(content: string): { thinking: ThinkingCard | null; body: string } {
+  const text = sanitizeAssistantContent(content)
+  if (!text) return { thinking: null, body: '' }
+  const match = text.match(/^###\s*AI 思考[\s\S]*?(?=\n---\n|$)/)
+  if (!match) return { thinking: null, body: text }
+  const thinkingRaw = String(match[0] || '').trim()
+  const body = text.slice(match[0].length).replace(/^\n---\n/, '').trim()
+  const steps = Array.from(thinkingRaw.matchAll(/^- (已完成|进行中|待处理) · (.+)$/gm)).map((item) => ({
+    state: String(item[1] || '').trim(),
+    label: String(item[2] || '').trim()
+  }))
+  const reasonMatch = thinkingRaw.match(/\*\*失败原因\*\*\s*- (.+)/)
+  const state: ThinkingCard['state'] = reasonMatch ? 'error' : /\*\*已完成\*\*/.test(thinkingRaw) ? 'done' : 'thinking'
+  return {
+    thinking: steps.length || reasonMatch ? { state, steps, reason: String(reasonMatch?.[1] || '').trim() } : null,
+    body
+  }
+}
+
+function isPlanMessage(content: string, id: string) {
+  if (chat.lastAgentPlanMessageId && chat.lastAgentPlanMessageId === id) return true
+  const text = parseAssistantSections(content).body || sanitizeAssistantContent(content)
+  if (!text || !currentPlan.value || !currentPlanTasks.value.length) return false
+  return /(^|\n)##\s*当前方案\b/.test(text) || /执行分解我已经整理好了/.test(text)
 }
 
 function pickFile() {
@@ -386,6 +438,7 @@ function readTabFromQuery(): AiTab {
   const t = route.query.tab ? String(route.query.tab) : ''
   if (t === 'review') return 'review'
   if (t === 'history') return 'history'
+  if (t === 'usage') return 'usage'
   return 'chat'
 }
 
@@ -418,7 +471,7 @@ onMounted(async () => {
     if (!route.query.projectId && obj && obj.projectId && Number.isFinite(Number(obj.projectId))) {
       projectId.value = Number(obj.projectId)
     }
-    if (!route.query.tab && obj && obj.tab && (obj.tab === 'review' || obj.tab === 'history')) {
+    if (!route.query.tab && obj && obj.tab && (obj.tab === 'review' || obj.tab === 'history' || obj.tab === 'usage')) {
       tab.value = obj.tab
       syncTab(tab.value)
     }
@@ -474,14 +527,12 @@ watch(
   <div class="chat-shell">
     <div class="page chat-page">
       <div class="head">
-        <div>
-          <h1 class="h1">AI</h1>
-        </div>
         <div class="tools">
           <div class="tabs">
             <button class="tab" :class="{ on: tab === 'chat' }" @click="syncTab('chat')">对话</button>
             <button class="tab" :class="{ on: tab === 'review' }" @click="syncTab('review')">审查</button>
             <button class="tab" :class="{ on: tab === 'history' }" @click="syncTab('history')">历史</button>
+            <button class="tab" :class="{ on: tab === 'usage' }" @click="syncTab('usage')">用量</button>
           </div>
           <n-select
             v-model:value="projectId"
@@ -499,6 +550,7 @@ watch(
         <div ref="viewport" class="viewport">
           <div v-for="m in chat.messages" :key="m.id" class="row" :class="m.role">
             <div class="bubble" :class="{ streaming: m.role === 'assistant' && chat.sending && m === chat.messages[chat.messages.length - 1] }">
+              <div v-if="m.role === 'assistant'" class="roleMeta assistant">AI</div>
               <div v-if="m.role === 'user' && (m as any).attachments && (m as any).attachments.length" class="attList">
                 <a
                   v-for="a in (m as any).attachments"
@@ -511,7 +563,57 @@ watch(
                   {{ a.filename }}
                 </a>
               </div>
-              <markdown-view v-if="m.role === 'assistant'" :content="m.content" :allow-details="true" />
+              <template v-if="m.role === 'assistant'">
+                <template v-for="section in [parseAssistantSections(m.content)]" :key="`assistant-${m.id}`">
+                  <div v-if="section.thinking" class="thinkingCard" :class="`is-${section.thinking.state}`">
+                    <div class="thinkingHead">
+                      <span class="thinkingTitle">
+                        {{
+                          section.thinking.state === 'done'
+                            ? '已思考'
+                            : section.thinking.state === 'error'
+                              ? '思考中断'
+                              : '思考中'
+                        }}
+                      </span>
+                    </div>
+                    <div v-if="section.thinking.steps.length" class="thinkingBody">
+                      <div class="thinkingSteps">
+                        <div v-for="(step, idx) in section.thinking.steps" :key="`${m.id}-thinking-${idx}`" class="thinkingStep">
+                          <span class="thinkingStepState">{{ step.state }}</span>
+                          <span class="thinkingStepLabel">{{ step.label }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-if="section.thinking.reason" class="thinkingBody">
+                      <div class="thinkingError">{{ section.thinking.reason }}</div>
+                    </div>
+                  </div>
+                  <markdown-view v-if="section.body" :content="section.body" :allow-details="true" />
+                </template>
+                <div
+                  v-if="isPlanMessage(m.content, m.id) && currentPlan && currentPlanTasks.length"
+                  class="planInline"
+                >
+                  <div class="planInlineBar">
+                    <div class="planInlineMeta">
+                      <span class="planInlineTag">执行分解</span>
+                      <span class="planInlineText">{{ currentPlanTasks.length }} 项执行内容</span>
+                      <span v-if="currentPlanHighCount" class="planInlineText">{{ currentPlanHighCount }} 项高优先级</span>
+                    </div>
+                    <button type="button" class="planInlineLink" @click="openPlanPreview">查看完整分解</button>
+                  </div>
+                  <div v-if="currentPlanPreview.length" class="planInlinePreview">
+                    <span
+                      v-for="(task, idx) in currentPlanPreview"
+                      :key="`${idx}-${task.title}`"
+                      class="planInlinePreviewItem"
+                    >
+                      {{ idx + 1 }}. {{ task.title }}
+                    </span>
+                  </div>
+                </div>
+              </template>
               <div v-else class="plain">{{ m.content }}</div>
               <span v-if="m.role === 'assistant' && chat.sending && m === chat.messages[chat.messages.length - 1]" class="stream-cursor" :class="streamCursor" />
             </div>
@@ -562,7 +664,8 @@ watch(
 
       <div v-else class="subpage">
         <ai-code-review-view v-if="tab === 'review'" />
-        <ai-history-view v-else />
+        <ai-history-view v-else-if="tab === 'history'" />
+        <ai-usage-view v-else />
       </div>
     </div>
   </div>
@@ -587,12 +690,109 @@ watch(
     </n-form>
   </n-modal>
 
+  <n-modal v-model:show="planPreviewOpen" preset="card" title="执行分解" class="planModal">
+    <div class="planPreview">
+      <div class="planHero">
+        <div class="planIntro">
+          <div class="planIntroEyebrow">Execution Plan</div>
+          <div class="planIntroTitle">{{ currentPlanGoal || '已整理一版执行方案' }}</div>
+          <div class="planIntroMeta">
+            <span>{{ currentPlanTasks.length }} 项执行内容</span>
+            <span v-if="currentPlanHighCount">· {{ currentPlanHighCount }} 项高优先级</span>
+          </div>
+        </div>
+        <div class="planHeroStats">
+          <div class="planHeroStat">
+            <div class="planHeroStatLabel">Execution Items</div>
+            <div class="planHeroStatValue">{{ currentPlanTasks.length }}</div>
+          </div>
+          <div class="planHeroStat">
+            <div class="planHeroStatLabel">High Priority</div>
+            <div class="planHeroStatValue">{{ currentPlanHighCount || 0 }}</div>
+          </div>
+          <div class="planHeroStat">
+            <div class="planHeroStatLabel">Top Focus</div>
+            <div class="planHeroStatText">{{ currentPlanTop[0]?.title || '方向已确认' }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="planBody">
+        <div v-if="currentPlanTop.length" class="planSidebar">
+          <div class="planSidebarSection">
+            <div class="planSectionTitle">优先推进</div>
+            <div class="planTop">
+              <div
+                v-for="(task, idx) in currentPlanTop"
+                :key="`${idx}-${task.title}`"
+                class="planTopRow"
+                :class="`priority-${String(task.priority || '').trim().toLowerCase()}`"
+              >
+                <div class="planTopIndex">{{ idx + 1 }}</div>
+                <div class="planTopMain">
+                  <div class="planTopTitle">{{ task.title }}</div>
+                  <div v-if="task.priority" class="planTopMeta">{{ task.priority }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="planMain">
+          <div class="planListHead">
+            <div class="planSectionTitle">全部执行项</div>
+          </div>
+          <div class="planList">
+            <div
+              v-for="(task, idx) in currentPlanTasks"
+              :key="`${idx}-${task.title}`"
+              class="planItem"
+              :class="`priority-${String(task.priority || '').trim().toLowerCase()}`"
+            >
+              <div class="planItemHead">
+                <div class="planItemIndex">{{ idx + 1 }}</div>
+                <div class="planItemTitle">{{ task.title }}</div>
+                <div v-if="task.priority" class="planItemPriority">{{ task.priority }}</div>
+              </div>
+              <div v-if="task.description" class="planItemDesc">{{ task.description }}</div>
+              <div v-if="Array.isArray(task.checklist) && task.checklist.length" class="planItemBlock planChecklistBlock">
+                <div class="planItemLabel">完成标准</div>
+                <div class="planItemTags">
+                  <span v-for="(item, cIdx) in task.checklist.slice(0, 8)" :key="`${idx}-c-${cIdx}`" class="planTag">{{ item }}</span>
+                </div>
+              </div>
+              <div
+                v-if="Array.isArray(task.deliverables) && task.deliverables.length"
+                class="planItemBlock planDeliverableBlock"
+              >
+                <div class="planItemLabel">交付物</div>
+                <div class="planItemTags">
+                  <span
+                    v-for="(item, dIdx) in task.deliverables.slice(0, 6)"
+                    :key="`${idx}-d-${dIdx}`"
+                    class="planTag"
+                  >
+                    {{ item.type }} · {{ item.title }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </n-modal>
+
 </template>
 
 <style scoped>
 .chat-shell {
   height: calc(100vh - 52px - 18px - 34px);
   min-height: 520px;
+  --accent-rgb: 15, 23, 42;
+  --accent2-rgb: 15, 23, 42;
+  --accent: #0f172a;
+  --accent2: #0f172a;
 }
 .chat-page {
   height: 100%;
@@ -633,8 +833,8 @@ watch(
   color: rgba(15, 23, 42, 0.92);
 }
 .tools :deep(.n-button.on) {
-  border-color: rgba(20, 184, 166, 0.25);
-  color: rgba(13, 148, 136, 0.95);
+  border-color: rgba(var(--accent-rgb), 0.14);
+  color: rgba(15, 23, 42, 0.92);
 }
 .frame {
   height: calc(100% - 52px);
@@ -677,6 +877,18 @@ watch(
 .row.assistant {
   justify-content: flex-start;
 }
+.roleMeta {
+  margin-bottom: 8px;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.46);
+}
+.roleMeta.assistant {
+  text-align: left;
+  color: rgba(15, 23, 42, 0.34);
+}
 .msgActions {
   opacity: 0;
   transform: translateY(-2px);
@@ -687,7 +899,7 @@ watch(
   transform: translateY(0);
 }
 .bubble {
-  max-width: min(920px, 96%);
+  max-width: min(900px, 92%);
   padding: 0;
   border-radius: 0;
   border: 0;
@@ -695,24 +907,50 @@ watch(
   box-shadow: none;
 }
 .row.user .bubble {
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(20, 184, 166, 0.10);
-  border-color: rgba(20, 184, 166, 0.18);
+  max-width: min(420px, 72%);
+  padding: 11px 13px;
+  border-radius: 16px;
+  background: rgba(var(--accent-rgb), 0.07);
+  border: 1px solid rgba(var(--accent-rgb), 0.08);
   box-shadow: none;
 }
 .row.assistant .bubble {
   position: relative;
   border: 0;
+  max-width: min(780px, 88%);
+  padding: 8px 18px 10px 22px;
+  border-radius: 20px;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.045), rgba(var(--accent-rgb), 0.018) 38%, rgba(255, 255, 255, 0));
+}
+.row.assistant .bubble::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(var(--accent2-rgb), 0.62), rgba(var(--accent-rgb), 0.24));
+}
+.row.assistant .bubble::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 0;
+  top: 10px;
+  bottom: 8px;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.045), rgba(var(--accent-rgb), 0.012) 38%, rgba(var(--accent-rgb), 0));
+  pointer-events: none;
 }
 .plain {
-  line-height: 1.75;
-  font-size: 15px;
+  line-height: 1.6;
+  font-size: 14px;
   color: rgba(15, 23, 42, 0.92);
   white-space: pre-wrap;
 }
 .row.user .plain {
   color: rgba(15, 23, 42, 0.92);
+  font-weight: 560;
 }
 .attList {
   display: flex;
@@ -727,7 +965,7 @@ watch(
   padding: 6px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.82);
-  color: rgba(13, 148, 136, 0.95);
+  color: rgba(15, 23, 42, 0.86);
   text-decoration: none;
   font-size: 12px;
   line-height: 1;
@@ -737,8 +975,8 @@ watch(
   background: rgba(255, 255, 255, 0.92);
 }
 .streaming {
-  outline: 2px solid rgba(20, 184, 166, 0.12);
-  outline-offset: 8px;
+  outline: 2px solid rgba(var(--accent-rgb), 0.08);
+  outline-offset: 6px;
 }
 .stream-cursor {
   display: inline-block;
@@ -747,7 +985,7 @@ watch(
   margin-left: 2px;
   vertical-align: -2px;
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(6, 182, 212, 0.92), rgba(20, 184, 166, 0.92));
+  background: linear-gradient(180deg, rgba(var(--accent2-rgb), 0.86), rgba(var(--accent-rgb), 0.86));
   opacity: 0.9;
 }
 .typing {
@@ -759,6 +997,164 @@ watch(
   backdrop-filter: blur(10px);
   position: sticky;
   bottom: 0;
+}
+.planInline {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.7)),
+    linear-gradient(90deg, rgba(var(--accent-rgb), 0.04), rgba(255, 255, 255, 0));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+.planInlineBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.planInlineMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.planInlineTag,
+.planInlineText {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+}
+.planInlineTag {
+  background: rgba(var(--accent-rgb), 0.08);
+  color: rgba(15, 23, 42, 0.84);
+}
+.planInlineText {
+  background: rgba(15, 23, 42, 0.045);
+  color: rgba(15, 23, 42, 0.62);
+}
+.planInlineLink {
+  appearance: none;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: rgba(15, 23, 42, 0.82);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.planInlineLink:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+.planInlinePreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.planInlinePreviewItem {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  color: rgba(15, 23, 42, 0.68);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.thinkingCard {
+  margin: 4px 0 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.thinkingHead {
+  margin-bottom: 8px;
+}
+.thinkingTitle {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.72);
+  letter-spacing: 0.01em;
+}
+.thinkingBody {
+  margin-left: 7px;
+  padding-left: 14px;
+  border-left: 2px solid rgba(15, 23, 42, 0.08);
+}
+.thinkingSteps {
+  display: grid;
+  gap: 8px;
+}
+.thinkingStep {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.thinkingStepState {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.4);
+}
+.thinkingStepLabel {
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(15, 23, 42, 0.74);
+}
+.thinkingError {
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(15, 23, 42, 0.62);
+}
+.thinkingCard.is-error .thinkingBody {
+  border-left-color: rgba(15, 23, 42, 0.12);
+}
+.thinkingCard.is-thinking .thinkingTitle,
+.thinkingCard.is-done .thinkingTitle,
+.thinkingCard.is-error .thinkingTitle {
+  color: rgba(15, 23, 42, 0.72);
+}
+.thinkingCard.is-error .thinkingError {
+  color: rgba(15, 23, 42, 0.62);
+}
+.thinkingCard.is-thinking .thinkingStepState,
+.thinkingCard.is-done .thinkingStepState,
+.thinkingCard.is-error .thinkingStepState {
+  color: rgba(15, 23, 42, 0.4);
+}
+.thinkingCard.is-thinking .thinkingStepLabel,
+.thinkingCard.is-done .thinkingStepLabel,
+.thinkingCard.is-error .thinkingStepLabel {
+  color: rgba(15, 23, 42, 0.74);
+}
+.thinkingCard.is-thinking .thinkingBody,
+.thinkingCard.is-done .thinkingBody,
+.thinkingCard.is-error .thinkingBody {
+  background: transparent;
+}
+.thinkingError + .thinkingSteps,
+.thinkingSteps + .thinkingError {
+  margin-top: 8px;
+}
+.thinkingError {
+  font-size: 12px;
+  line-height: 1.55;
 }
 .composer-inner {
   padding: 10px 12px 12px;
@@ -812,7 +1208,7 @@ watch(
   font-size: 12px;
   font-weight: 760;
   color: rgba(15, 23, 42, 0.82);
-  background: linear-gradient(180deg, rgba(6, 182, 212, 0.18), rgba(20, 184, 166, 0.16));
+  background: linear-gradient(180deg, rgba(var(--accent2-rgb), 0.12), rgba(var(--accent-rgb), 0.10));
 }
 .fileName {
   flex: 1 1 auto;
@@ -878,6 +1274,7 @@ watch(
   font-size: 15px;
   line-height: 1.75;
   color: rgba(15, 23, 42, 0.92);
+  max-width: 760px;
 }
 .row.assistant .bubble :deep(.md h1),
 .row.assistant .bubble :deep(.md h2),
@@ -893,6 +1290,16 @@ watch(
   position: relative;
   padding-left: 12px;
 }
+.row.assistant .bubble :deep(.md h3) {
+  margin-top: 16px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.row.assistant .bubble :deep(.md hr) {
+  margin: 16px 0 14px;
+  border: 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
 .row.assistant .bubble :deep(.md h2)::before {
   content: '';
   position: absolute;
@@ -901,32 +1308,322 @@ watch(
   bottom: 4px;
   width: 4px;
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(6, 182, 212, 0.92), rgba(20, 184, 166, 0.92));
+  background: linear-gradient(180deg, rgba(var(--accent2-rgb), 0.86), rgba(var(--accent-rgb), 0.86));
 }
 .row.assistant .bubble :deep(.md strong) {
-  color: rgba(13, 148, 136, 0.95);
+  color: rgba(15, 23, 42, 0.92);
   font-weight: 760;
 }
 .row.assistant .bubble :deep(.md em) {
-  color: rgba(6, 182, 212, 0.86);
+  color: rgba(15, 23, 42, 0.78);
 }
 .row.assistant .bubble :deep(.md ul li::marker),
 .row.assistant .bubble :deep(.md ol li::marker) {
-  color: rgba(20, 184, 166, 0.75);
+  color: rgba(15, 23, 42, 0.62);
 }
 .row.assistant .bubble :deep(.md blockquote) {
   margin: 10px 0;
   padding: 10px 12px;
-  border-left: 3px solid rgba(20, 184, 166, 0.35);
+  border-left: 3px solid rgba(var(--accent-rgb), 0.18);
   border-radius: 0 12px 12px 0;
-  background: rgba(20, 184, 166, 0.06);
+  background: rgba(var(--accent-rgb), 0.04);
   color: rgba(15, 23, 42, 0.80);
 }
 .row.assistant .bubble :deep(.md p code),
 .row.assistant .bubble :deep(.md li code) {
-  color: rgba(13, 148, 136, 0.95);
+  color: rgba(15, 23, 42, 0.92);
   background: rgba(15, 23, 42, 0.06);
   border-color: rgba(15, 23, 42, 0.10);
+}
+.planModal {
+  width: min(1100px, calc(100vw - 28px));
+  --accent-rgb: 15, 23, 42;
+  --accent2-rgb: 15, 23, 42;
+  --accent: #0f172a;
+  --accent2: #0f172a;
+}
+.planModal :deep(.n-card) {
+  border-radius: 24px;
+  box-shadow: 0 32px 90px rgba(15, 23, 42, 0.18);
+}
+.planModal :deep(.n-card-header) {
+  padding: 18px 22px 0;
+}
+.planModal :deep(.n-card__content) {
+  padding: 14px 22px 22px;
+}
+.planPreview {
+  display: grid;
+  gap: 22px;
+}
+.planHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(var(--accent-rgb), 0.08), rgba(15, 23, 42, 0.04) 44%, rgba(255, 255, 255, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+.planIntro {
+  min-width: 0;
+}
+.planIntroEyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.42);
+}
+.planIntroTitle {
+  margin-top: 6px;
+  font-size: 20px;
+  line-height: 1.35;
+  font-weight: 760;
+  color: rgba(15, 23, 42, 0.94);
+}
+.planIntroMeta {
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.6);
+}
+.planHeroStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.planHeroStat {
+  min-width: 0;
+  padding: 14px 14px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.74));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+.planHeroStat:nth-child(1) {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.05), rgba(255, 255, 255, 0.8));
+}
+.planHeroStat:nth-child(2) {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.05), rgba(255, 255, 255, 0.8));
+}
+.planHeroStat:nth-child(3) {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.05), rgba(255, 255, 255, 0.8));
+}
+.planHeroStatLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.42);
+}
+.planHeroStatValue {
+  margin-top: 10px;
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 760;
+  color: rgba(15, 23, 42, 0.94);
+}
+.planHeroStatText {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.82);
+}
+.planBody {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.planSidebar {
+  position: sticky;
+  top: 0;
+}
+.planSidebarSection {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.02));
+}
+.planSectionTitle {
+  margin-bottom: 12px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.44);
+}
+.planTop {
+  display: grid;
+  gap: 10px;
+}
+.planTopRow,
+.planItemHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.planTopRow + .planTopRow {
+  margin-top: 10px;
+}
+.planTopRow {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.78);
+}
+.planTopIndex,
+.planItemIndex {
+  flex: 0 0 20px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.46);
+}
+.planTopMain,
+.planItemTitle {
+  min-width: 0;
+}
+.planTopTitle,
+.planItemTitle {
+  font-size: 14px;
+  font-weight: 650;
+  color: rgba(15, 23, 42, 0.92);
+}
+.planTopMeta,
+.planItemPriority {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.5);
+}
+.planList {
+  display: grid;
+  gap: 14px;
+  max-height: min(58vh, 720px);
+  overflow: auto;
+  padding-right: 6px;
+}
+.planMain {
+  min-width: 0;
+}
+.planListHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.planList::-webkit-scrollbar {
+  width: 8px;
+}
+.planList::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.12);
+}
+.planList::-webkit-scrollbar-track {
+  background: transparent;
+}
+.planItem {
+  padding: 16px 18px 18px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.76)),
+    linear-gradient(90deg, rgba(var(--accent-rgb), 0.025), rgba(255, 255, 255, 0));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 14px 30px rgba(15, 23, 42, 0.04);
+}
+.planTopRow.priority-high,
+.planItem.priority-high {
+  border-color: rgba(15, 23, 42, 0.16);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.06), rgba(255, 255, 255, 0.82)),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.03), rgba(255, 255, 255, 0));
+}
+.planTopRow.priority-medium,
+.planItem.priority-medium {
+  border-color: rgba(15, 23, 42, 0.14);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.05), rgba(255, 255, 255, 0.82)),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.03), rgba(255, 255, 255, 0));
+}
+.planTopRow.priority-low,
+.planItem.priority-low {
+  border-color: rgba(15, 23, 42, 0.12);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(255, 255, 255, 0.82)),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.02), rgba(255, 255, 255, 0));
+}
+.planItemHead {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: flex-start;
+  gap: 10px;
+}
+.planItemDesc {
+  margin: 6px 0 0 30px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: rgba(15, 23, 42, 0.72);
+}
+.planItemBlock {
+  margin: 10px 0 0 30px;
+}
+.planItemLabel {
+  margin-bottom: 6px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(15, 23, 42, 0.42);
+}
+.planItemTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.planChecklistBlock .planTag {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.05);
+}
+.planDeliverableBlock .planTag {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.05);
+}
+.planTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.84);
+  color: rgba(15, 23, 42, 0.74);
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .planHero,
+  .planBody {
+    grid-template-columns: 1fr;
+  }
+
+  .planHeroStats {
+    grid-template-columns: 1fr;
+  }
+
+  .planInlineBar,
+  .planInlineLink {
+    width: 100%;
+  }
+
+  .planInlineBar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .row.assistant .bubble :deep(pre.hljs) {

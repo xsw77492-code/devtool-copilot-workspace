@@ -17,6 +17,11 @@ public class AiChatHistoryServiceImpl extends ServiceImpl<AiChatHistoryMapper, A
 
     @Override
     public void record(Long userId, Long projectId, String prompt, String response) {
+        record(userId, projectId, prompt, response, "chat");
+    }
+
+    @Override
+    public void record(Long userId, Long projectId, String prompt, String response, String type) {
         if (userId == null) {
             throw new IllegalArgumentException("USER_ID_REQUIRED");
         }
@@ -28,11 +33,12 @@ public class AiChatHistoryServiceImpl extends ServiceImpl<AiChatHistoryMapper, A
         h.setProjectId(projectId);
         h.setPrompt(prompt == null ? "" : prompt);
         h.setResponse(response);
+        h.setType(type == null || type.isBlank() ? "chat" : type.trim());
         this.save(h);
     }
 
     @Override
-    public List<AiChatHistoryDTO> list(Long userId, Long projectId, Integer limit) {
+    public List<AiChatHistoryDTO> list(Long userId, Long projectId, String type, Integer limit) {
         if (userId == null) {
             throw new IllegalArgumentException("USER_ID_REQUIRED");
         }
@@ -45,6 +51,9 @@ public class AiChatHistoryServiceImpl extends ServiceImpl<AiChatHistoryMapper, A
                 .orderByDesc(AiChatHistory::getId);
         if (projectId != null) {
             q.eq(AiChatHistory::getProjectId, projectId);
+        }
+        if (type != null && !type.isBlank()) {
+            q.eq(AiChatHistory::getType, type.trim());
         }
         List<AiChatHistory> list = this.list(q.last("limit " + n));
         return list.stream().map(this::toDTO).collect(Collectors.toList());
@@ -81,6 +90,7 @@ public class AiChatHistoryServiceImpl extends ServiceImpl<AiChatHistoryMapper, A
         dto.setProjectId(h.getProjectId());
         dto.setPrompt(h.getPrompt());
         dto.setResponse(h.getResponse());
+        dto.setType(h.getType());
         dto.setCreateTime(h.getCreateTime() == null ? null : h.getCreateTime().toString());
         return dto;
     }

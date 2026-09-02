@@ -79,19 +79,18 @@ function viewLabel(m: PresenceMember) {
 .presence {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px solid rgba(20, 184, 166, 0.18);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.8);
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
-  backdrop-filter: blur(8px);
+  gap: 8px;
+  padding: 3px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .label {
   font-size: 12px;
-  font-weight: 900;
-  color: rgba(15, 23, 42, 0.82);
+  font-weight: 760;
+  color: rgba(15, 23, 42, 0.75);
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
@@ -99,11 +98,11 @@ function viewLabel(m: PresenceMember) {
 }
 
 .liveDot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  background: var(--accent);
-  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.12);
+  background: rgba(20, 184, 166, 0.90);
+  box-shadow: none;
 }
 
 .list {
@@ -113,17 +112,17 @@ function viewLabel(m: PresenceMember) {
 }
 
 .av {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.65);
   display: grid;
   place-items: center;
   font-size: 12px;
   font-weight: 700;
   color: rgba(15, 23, 42, 0.85);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .av.offline {
@@ -136,7 +135,6 @@ function viewLabel(m: PresenceMember) {
 }
 
 .av:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  background: #fff;
 }
 </style>
