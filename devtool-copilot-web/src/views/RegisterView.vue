@@ -22,7 +22,7 @@ let cooldownTimer: number | null = null
 
 const canSend = computed(() => cooldown.value <= 0 && !!email.value.trim() && !sendLoading.value)
 
-const logoUrl = new URL('../assets/logo.png.png', import.meta.url).href
+const logoUrl = new URL('../assets/logo.png', import.meta.url).href
 const themeOverrides = {
   common: {
     primaryColor: '#4f46e5',

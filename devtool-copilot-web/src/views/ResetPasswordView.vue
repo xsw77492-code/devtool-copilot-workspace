@@ -13,7 +13,7 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const loading = ref(false)
 
-const logoUrl = new URL('../assets/logo.png.png', import.meta.url).href
+const logoUrl = new URL('../assets/logo.png', import.meta.url).href
 const themeOverrides = {
   common: {
     primaryColor: '#4f46e5',
